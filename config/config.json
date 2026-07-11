@@ -1,0 +1,9 @@
+    {
+  "dashboard": {
+    "defaultPeriodMonths": 12,
+    "defaultPageSize": 10,
+    "allowedPageSizes": [10, 25, 50, 100],
+    "currency": "INR",
+    "timezone": "Asia/Kolkata"
+  }
+}

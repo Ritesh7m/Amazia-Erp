@@ -99,7 +99,6 @@ export const executeTransaction = async <T>(
 
 export const initializeDatabase = async (): Promise<void> => {
   const schemaQueries = [
-    // --- Existing Tables ---
     `CREATE SEQUENCE IF NOT EXISTS seq_import_history;`,
     `CREATE TABLE IF NOT EXISTS import_history (
       id INTEGER DEFAULT nextval('seq_import_history') PRIMARY KEY,
@@ -138,7 +137,6 @@ export const initializeDatabase = async (): Promise<void> => {
       category VARCHAR,
       color VARCHAR,
       quantity DOUBLE,
-      material_cost DOUBLE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(order_no, material_type, category, color)

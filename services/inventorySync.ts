@@ -1,3 +1,4 @@
+//services\inventorySync.ts
 import type { Connection } from 'duckdb';
 import { fetchQuery, executeTransaction, executePreparedStatement, getConnection } from '@/database';
 import { fetchNewInventoryRows } from './googleSheets';
@@ -56,8 +57,8 @@ export const runInventorySync = async () => {
       for (let i = 0; i < validRecords.length; i += CHUNK_SIZE) {
         const chunk = validRecords.slice(i, i + CHUNK_SIZE);
         
-        // Create exactly the right number of (?, ?, ?, ?, ?, ?) placeholders
-        const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+        // Create exactly the right number of (?, ?, ?, ?, ?) placeholders
+        const placeholders = chunk.map(() => '(?, ?, ?, ?, ?)').join(', ');
         
         // Flatten the data into a single 1D array for the prepared statement
         const params = chunk.flatMap(record => [
@@ -65,16 +66,15 @@ export const runInventorySync = async () => {
           record.material_type,
           record.category,
           record.color,
-          record.quantity,
-          record.material_cost
+          record.quantity
+         
         ]);
 
         const upsertQuery = `
-          INSERT INTO inventory_table (order_no, material_type, category, color, quantity, material_cost)
+          INSERT INTO inventory_table (order_no, material_type, category, color, quantity)
           VALUES ${placeholders}
           ON CONFLICT (order_no, material_type, category, color) DO UPDATE SET 
             quantity = EXCLUDED.quantity,
-            material_cost = EXCLUDED.material_cost,
             updated_at = now();
         `;
 

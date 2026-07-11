@@ -14,5 +14,5 @@ export interface InventoryRecord {
   category: string;
   color: string;
   quantity: number;
-  material_cost: number;
+  // material_cost: number;
 }

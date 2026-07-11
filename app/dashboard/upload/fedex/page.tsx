@@ -1,0 +1,16 @@
+import UploadCard from '@/components/upload/UploadCard';
+
+export default function FedExUploadPage() {
+  return (
+    <div className="relative w-full flex flex-col items-center py-10">
+      <div className="w-full absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-[var(--color-brand-gold)]/20 blur-3xl" />
+        <div className="absolute top-[60%] -right-[10%] w-[40%] h-[40%] rounded-full bg-[var(--color-brand-success)]/30 blur-3xl" />
+      </div>
+      
+      <div className="relative z-10 w-full flex flex-col items-center">
+        <UploadCard />
+      </div>
+    </div>
+  );
+}

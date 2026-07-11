@@ -1,3 +1,4 @@
+// services\inventoryProcessor.ts
 import { RawSheetRow, InventoryRecord } from '@/types/inventory';
 import { inventoryRowSchema } from '@/utils/inventoryValidation';
 
@@ -40,7 +41,7 @@ export const processAndAggregateInventory = (
     if (aggregationMap.has(hashKey)) {
       const existing = aggregationMap.get(hashKey)!;
       existing.quantity += quantity;
-      existing.material_cost = existing.quantity * MATERIAL_COST_MULTIPLIER;
+      // existing.material_cost = existing.quantity * MATERIAL_COST_MULTIPLIER;
     } else {
       aggregationMap.set(hashKey, {
         order_no: normalizedOrderId,
@@ -48,7 +49,7 @@ export const processAndAggregateInventory = (
         category: row.category.trim(),
         color: row.color.trim(),
         quantity: quantity,
-        material_cost: quantity * MATERIAL_COST_MULTIPLIER,
+        // material_cost: quantity * MATERIAL_COST_MULTIPLIER,
       });
     }
   }
