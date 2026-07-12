@@ -1,62 +1,89 @@
 'use client';
-import Link from 'next/link';
-import { ActivityData } from '@/lib/dashboard/dashboardTypes';
+import { FileText, Upload, RefreshCw, Package } from 'lucide-react';
 
-export default function RecentActivity({ data, isLoading }: { data: ActivityData[], isLoading: boolean }) {
-  // Simple time ago formatter
-  const timeAgo = (dateStr: string) => {
-    const diff = (new Date().getTime() - new Date(dateStr).getTime()) / 1000;
-    if (diff < 3600) return `${Math.floor(diff / 60)} mins ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
-    return `${Math.floor(diff / 86400)} days ago`;
+interface RecentActivityProps {
+  data: any[]; // Using any to flexibly catch your real database structure
+  isLoading: boolean;
+}
+
+export default function RecentActivity({ data, isLoading }: RecentActivityProps) {
+  const getIcon = (type: string) => {
+    switch (type?.toLowerCase()) {
+      case 'upload': return <Upload className="w-4 h-4 text-[var(--color-brand-primary)]" />;
+      case 'sync': return <RefreshCw className="w-4 h-4 text-blue-600" />;
+      case 'order': return <Package className="w-4 h-4 text-orange-600" />;
+      default: return <FileText className="w-4 h-4 text-[var(--color-brand-muted)]" />;
+    }
   };
 
-  const getIcon = (source: string) => {
-    if (source.includes('Etsy')) return '🏪';
-    if (source.includes('FedEx')) return '🚚';
-    return '📦';
+  // Helper to format that ugly ISO string into a nice readable date!
+  const formatTime = (timeStr: string) => {
+    if (!timeStr) return '';
+    const d = new Date(timeStr);
+    if (isNaN(d.getTime())) return timeStr; // Fallback if it's not a real date
+    
+    // Returns format: "Jul 11, 06:13 PM"
+    return d.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit', 
+      minute: '2-digit'
+    });
   };
 
   return (
-    <div className="bg-[var(--color-brand-card)] p-6 rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] shadow-sm h-full flex flex-col">
-      <div className="flex justify-between items-center mb-6">
-        <h3 className="font-semibold text-[var(--color-brand-primary)]">Recent Activity</h3>
-        <Link href="/dashboard/activity" className="text-sm px-3 py-1.5 border border-[var(--color-brand-border)] rounded-lg hover:bg-[var(--color-brand-background)] transition-colors text-[var(--color-brand-muted)] font-medium">
+    <div className="bg-[var(--color-brand-card)] rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] shadow-sm p-6 h-full flex flex-col">
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-[16px] font-bold text-[var(--color-brand-primary)]">Recent Activity</h3>
+        <button className="text-sm font-medium text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)] transition-colors px-3 py-1 rounded-lg border border-transparent hover:border-[var(--color-brand-border)] hover:bg-[var(--color-brand-background)]">
           View All
-        </Link>
+        </button>
       </div>
-      
-      <div className="flex-1 space-y-6">
+
+      <div className="flex-1">
         {isLoading ? (
-           <div className="text-center text-sm text-[var(--color-brand-muted)] py-4">Loading activity...</div>
-        ) : data.length === 0 ? (
-           <div className="text-center text-sm text-[var(--color-brand-muted)] py-4">No recent activity.</div>
+          <div className="flex items-center justify-center h-32 text-sm text-[var(--color-brand-muted)]">Loading activity...</div>
+        ) : !data || data.length === 0 ? (
+          <div className="flex items-center justify-center h-32 text-sm text-[var(--color-brand-muted)]">No recent activity.</div>
         ) : (
-          data.map((act, i) => (
-            <div key={i} className="flex gap-4">
-              <div className="w-10 h-10 rounded-full bg-[var(--color-brand-background)] flex items-center justify-center text-lg shadow-sm border border-[var(--color-brand-border)] flex-shrink-0">
-                {getIcon(act.source)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-[var(--color-brand-primary)] truncate">
-                  {act.source} {act.action}
-                </p>
-                <p className="text-xs text-[var(--color-brand-muted)] truncate mt-0.5">
-                  {act.rowsProcessed > 0 ? `${act.rowsProcessed.toLocaleString()} records processed` : 'System synchronization completed'}
-                </p>
-              </div>
-              <div className="text-xs text-[var(--color-brand-muted)] whitespace-nowrap">
-                {timeAgo(act.timestamp)}
-              </div>
-            </div>
-          ))
+          <div className="space-y-6">
+            {data.map((activity, index) => {
+              // Fallbacks in case your API uses different column names
+              const title = activity.title || activity.action || activity.event || 'System Activity';
+              const description = activity.description || activity.details || activity.message || '';
+              const timeString = activity.timestamp || activity.created_at || activity.date;
+              
+              return (
+                <div key={activity.id || index} className="flex gap-4 group">
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-[var(--color-brand-background)] border border-[var(--color-brand-border)] flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                      {getIcon(activity.type)}
+                    </div>
+                    {index !== data.length - 1 && (
+                      <div className="absolute top-10 bottom-[-24px] left-1/2 -translate-x-1/2 w-px bg-[var(--color-brand-border)]"></div>
+                    )}
+                  </div>
+                  <div className="pt-2 flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-[var(--color-brand-primary)] truncate">{title}</p>
+                    {description && (
+                      <p className="text-[13px] text-[var(--color-brand-muted)] mt-0.5 truncate">{description}</p>
+                    )}
+                  </div>
+                  <div className="pt-2 whitespace-nowrap">
+                    <span className="text-xs font-medium text-[var(--color-brand-muted)]">{formatTime(timeString)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
-      
+
       <div className="mt-6 pt-4 border-t border-[var(--color-brand-border)]">
-        <Link href="/dashboard/activity" className="text-sm text-[var(--color-brand-primary)] hover:underline font-medium flex items-center">
-          View all activity logs <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
-        </Link>
+        <button className="text-sm font-semibold text-[var(--color-brand-primary)] hover:text-opacity-80 flex items-center transition-colors">
+          View all activity logs
+          <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+        </button>
       </div>
     </div>
   );

@@ -177,31 +177,93 @@ export async function getMonthlyMaterials(
 /**
  * Fetches paginated orders with their material cost joined from inventory.
  */
-export async function getOrders(startDate: string, endDate: string, limit: number, offset: number = 0) {
-  const query = `
+/**
+ * Fetches paginated orders with their material cost joined from inventory.
+ */
+/**
+ * Fetches paginated orders with their material cost joined from inventory.
+ */
+export async function getOrders(startDate: string, endDate: string, limit: number, offset: number = 0, searchQuery: string = '') {
+  
+  const searchFilter = searchQuery ? `AND e.order_no LIKE '%${searchQuery}%'` : '';
+
+  const dataQuery = `
     SELECT 
-      e.order_no as orderNo, 
-      e.date as saleDate, 
-      e.net_amt as sales, 
-      COALESCE(SUM(i.quantity * ?), 0) as materialCost
+      e.order_no AS "orderNo", 
+      e.date AS "saleDate", 
+      CAST(REPLACE(CAST(e.net_amt AS TEXT), ',', '') AS REAL) AS "sales", 
+      COALESCE(SUM(i.quantity * ?), 0) AS "materialCost"
     FROM etsy_statement e
     LEFT JOIN inventory_table i ON e.order_no = i.order_no
-    WHERE e.date >= ? AND e.date <= ?
+    WHERE e.date >= ? AND e.date <= ? ${searchFilter}
     GROUP BY e.order_no, e.date, e.net_amt
     ORDER BY e.date DESC
     LIMIT ? OFFSET ?
   `;
   
-  const rows = await fetchQuery<any>(query, [MATERIAL_COST_RATE, startDate, endDate, limit, offset]);
+  const countQuery = `
+    SELECT COUNT(DISTINCT order_no) as total
+    FROM etsy_statement e
+    WHERE date >= ? AND date <= ? ${searchFilter}
+  `;
   
-  return rows.map(r => {
-    const profit = r.sales - r.materialCost;
-    return {
-      ...r,
-      estimatedProfitBeforeShipping: profit,
-      status: profit > 0 ? 'Profitable' : 'Neutral'
+  try {
+    const [rows, countResult] = await Promise.all([
+      fetchQuery<any>(dataQuery, [MATERIAL_COST_RATE, startDate, endDate, Number(limit), Number(offset)]),
+      fetchQuery<{ total: number }>(countQuery, [startDate, endDate])
+    ]);
+    
+    const totalRecords = countResult[0]?.total || 0;
+    
+    const data = rows.map(r => {
+      // Fallbacks added to ensure we read the property regardless of how the database formats the casing
+      const orderNo = r.orderNo || r.orderno || r.ORDERNO || '';
+      const saleDate = r.saleDate || r.saledate || r.SALEDATE || '';
+      const sales = Number(r.sales || r.SALES || 0);
+      const materialCost = Number(r.materialCost || r.materialcost || r.MATERIALCOST || 0);
+      
+      const profit = sales - materialCost;
+      return {
+        orderNo,
+        saleDate,
+        sales,
+        materialCost,
+        estimatedProfitBeforeShipping: profit,
+        status: profit > 0 ? 'Profitable' : 'Neutral'
+      };
+    });
+
+    return { data, totalRecords };
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    return { data: [], totalRecords: 0 };
+  }
+}
+
+/**
+ * Fetch sync timestamps based on database upload time (created_at).
+ */
+export async function getSyncDates() {
+  try {
+    // We query MAX(created_at) and alias it uniformly as "lastUpload"
+    const etsy = await fetchQuery<any>('SELECT MAX(created_at) as "lastUpload" FROM etsy_statement').catch(() => []);
+    const fedex = await fetchQuery<any>('SELECT MAX(created_at) as "lastUpload" FROM fedex_billing').catch(() => []);
+    const inventory = await fetchQuery<any>('SELECT MAX(created_at) as "lastUpload" FROM inventory_table').catch(() => []);
+
+    // Helper function to safely extract the date, avoiding capitalization errors from the DB
+    const extractDate = (result: any[]) => {
+      if (!result || !result[0]) return null;
+      return result[0].lastUpload || result[0].lastupload || result[0].LASTUPLOAD || null;
     };
-  });
+
+    return {
+      etsy: extractDate(etsy),
+      fedex: extractDate(fedex),
+      inventory: extractDate(inventory),
+    };
+  } catch (error) {
+    return { etsy: null, fedex: null, inventory: null };
+  }
 }
 
 /**
@@ -223,3 +285,5 @@ export async function getActivityLogs(limit: number, offset: number = 0) {
   
   return await fetchQuery<any>(query, [limit, offset]);
 }
+
+

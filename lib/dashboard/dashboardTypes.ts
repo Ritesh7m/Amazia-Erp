@@ -50,9 +50,9 @@ export interface OrderData {
 }
 
 export interface ActivityData {
-  source: string;
-  action: string;
-  status: string;
-  rowsProcessed: number;
+  id: string;
+  type: 'upload' | 'sync' | 'order' | 'system';
+  title: string;
+  description: string;
   timestamp: string;
 }

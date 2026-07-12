@@ -1,68 +1,29 @@
 "use client";
 
 import React, { useState, useRef } from 'react';
-import { Loader2, X, CheckCircle2, Upload, ShieldCheck, Zap } from 'lucide-react';
+import { Loader2, X, CheckCircle2, Upload, Truck, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
 import { SUPPORTED_INVOICE_TYPES } from '@/constants';
 import { InvoiceType } from '@/types';
 
-
-function ShopifyIcon({ className }: { className?: string }) {
+// Custom Cloud SVG styled with your brand colors
+function PremiumCloudIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <path d="M7 8h10l1 12H6L7 8Z" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" />
-      <path d="M9 8a3 3 0 1 1 6 0" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
-    </svg>
+    <div className={`relative flex items-center justify-center ${className}`}>
+      <svg width="100%" height="100%" viewBox="0 0 120 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M93.3333 41.6667C93.3333 24.1777 79.1557 10 61.6667 10C47.4697 10 35.4526 19.3364 31.3323 32.1856C20.6722 33.5654 12.5 42.6373 12.5 53.75C12.5 66.1764 22.5736 76.25 35 76.25H90C101.046 76.25 110 67.2957 110 56.25C110 45.4746 101.488 36.6853 90.8166 36.2625C91.6624 38.0163 92.2961 39.8787 92.6841 41.8159C93.1091 41.7766 93.3333 41.6667 93.3333 41.6667Z" fill="var(--color-brand-success)" stroke="var(--color-brand-primary)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.5"/>
+        <path d="M61.6667 43.3333V63.3333" stroke="var(--color-brand-primary)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M51.6667 53.3333L61.6667 43.3333L71.6667 53.3333" stroke="var(--color-brand-primary)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+      <div className="absolute -bottom-2 right-4 bg-[var(--color-brand-card)] rounded-lg shadow-sm border border-[var(--color-brand-border)] p-1 flex flex-col items-center justify-center">
+        <div className="w-7 h-8 border-2 border-[var(--color-brand-primary)] rounded text-[8px] font-bold text-[var(--color-brand-primary)] flex items-center justify-center relative bg-[var(--color-brand-card)] z-10">
+          CSV
+          <div className="absolute top-0 right-0 w-2.5 h-2.5 border-b-2 border-l-2 border-[var(--color-brand-primary)] bg-[var(--color-brand-background)] rounded-bl" />
+        </div>
+      </div>
+    </div>
   );
 }
-
-function FedexIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <path
-        d="M3 16V8a1 1 0 0 1 1-1h9v9H4a1 1 0 0 1-1-1Z"
-        stroke="currentColor"
-        strokeWidth={1.6}
-        strokeLinejoin="round"
-      />
-      <path
-        d="M13 10h4.2a1 1 0 0 1 .8.4l2 2.6a1 1 0 0 1 .2.6V16a1 1 0 0 1-1 1H13"
-        stroke="currentColor"
-        strokeWidth={1.6}
-        strokeLinejoin="round"
-      />
-      <circle cx="7.5" cy="17.5" r="1.4" stroke="currentColor" strokeWidth={1.6} />
-      <circle cx="16.5" cy="17.5" r="1.4" stroke="currentColor" strokeWidth={1.6} />
-    </svg>
-  );
-}
-
-function CsvFileIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 64 76" fill="none" className={className}>
-      <path
-        d="M16 4h24l12 12v56a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"
-        stroke="currentColor"
-        strokeWidth={2.5}
-        strokeLinejoin="round"
-      />
-      <path d="M40 4v12h12" stroke="currentColor" strokeWidth={2.5} strokeLinejoin="round" />
-      <rect x="17" y="44" width="30" height="17" rx="8.5" fill="currentColor" />
-      <text
-        x="32"
-        y="56"
-        textAnchor="middle"
-        fontSize="10.5"
-        fontWeight="800"
-        className="fill-brand-card"
-        fontFamily="system-ui, sans-serif"
-      >
-        CSV
-      </text>
-    </svg>
-  );
-}
-
 
 export default function UploadCard({ onCancel }: { onCancel?: () => void }) {
   const [invoiceType, setInvoiceType] = useState<InvoiceType>(SUPPORTED_INVOICE_TYPES.FEDEX);
@@ -123,8 +84,7 @@ export default function UploadCard({ onCancel }: { onCancel?: () => void }) {
     const formData = new FormData();
     formData.append('file', file);
 
-    const endpoint =
-      invoiceType === SUPPORTED_INVOICE_TYPES.FEDEX ? '/api/import/fedex' : '/api/import/etsy';
+    const endpoint = invoiceType === SUPPORTED_INVOICE_TYPES.FEDEX ? '/api/import/fedex' : '/api/import/etsy';
 
     try {
       const response = await fetch(endpoint, {
@@ -147,112 +107,107 @@ export default function UploadCard({ onCancel }: { onCancel?: () => void }) {
     }
   };
 
-  // Same derivation approach as before: label/icon are computed from
-  // SUPPORTED_INVOICE_TYPES, not hardcoded, so new types keep working.
-  const getOptionMeta = (type: InvoiceType) => {
-    if (type === SUPPORTED_INVOICE_TYPES.FEDEX) {
-      return { label: 'FedEx Billing', Icon: FedexIcon };
-    }
-    return { label: `${String(type).charAt(0)}${String(type).slice(1).toLowerCase()} Statement`, Icon: ShopifyIcon };
-  };
-
-  const invoiceOptions = (Object.values(SUPPORTED_INVOICE_TYPES) as InvoiceType[]).map((value) => ({
-    value,
-    ...getOptionMeta(value),
-  }));
-
   return (
-    <div className="w-full max-w-xl mx-auto bg-brand-card rounded-[28px] shadow-glass p-9">
+        <div className="w-full max-w-[800px] mx-auto bg-[var(--color-brand-card)] rounded-[var(--radius-2xl)] shadow-[var(--shadow-glass)] p-6 md:p-8 border border-[var(--color-brand-border)]">
+      
       {/* Header */}
-      <div className="mb-7 text-center">
-        <h2 className="text-3xl font-extrabold text-brand-primary tracking-tight">Upload Billing File</h2>
-        <p className="text-brand-muted mt-2.5 text-[15px] leading-relaxed max-w-sm mx-auto">
+      <div className="text-center">
+        <h2 className="text-2xl md:text-3xl font-bold text-[var(--color-brand-primary)] tracking-tight">Upload Billing File</h2>
+        <p className="text-[var(--color-brand-muted)] mt-2 text-[15px] leading-relaxed max-w-lg mx-auto">
           Import Shopify or FedEx invoices to automatically generate expense information.
         </p>
       </div>
 
-      {/* Invoice Type Selector */}
-      <div className="flex gap-3 mb-6">
-        {invoiceOptions.map(({ value, label, Icon }) => {
-          const isActive = invoiceType === value;
-          return (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setInvoiceType(value)}
-              className={`relative flex-1 min-w-0 flex items-center justify-center gap-2 py-[15px] px-4 rounded-full text-[14.5px] font-semibold transition-all duration-200 ${
-                isActive
-                  ? 'bg-brand-card border-2 border-brand-primary text-brand-primary'
-                  : 'bg-transparent border border-brand-border text-brand-muted hover:border-brand-primary/40 hover:text-brand-primary'
-              }`}
-            >
-              <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-brand-primary' : 'text-brand-muted'}`} />
-              <span className="truncate">{label}</span>
-              {isActive && (
-                <span className="absolute -top-2.5 -right-2.5 flex items-center justify-center w-6 h-6 rounded-full bg-brand-primary ring-[2.5px] ring-brand-card">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-white" strokeWidth={2.5} />
-                </span>
-              )}
-            </button>
-          );
-        })}
+      {/* Segmented Control */}
+      <div className="flex p-1.5 mb-6 bg-[var(--color-brand-background)] border border-[var(--color-brand-border)] rounded-[var(--radius-xl)] shadow-sm">
+        <button
+          type="button"
+          onClick={() => setInvoiceType(SUPPORTED_INVOICE_TYPES.FEDEX)}
+          className={`flex-1 flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-[14px] text-[14px] font-semibold transition-all duration-300 ${
+            invoiceType === SUPPORTED_INVOICE_TYPES.FEDEX
+              ? 'bg-[var(--color-brand-primary)] text-white shadow-md'
+              : 'bg-transparent text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)]'
+          }`}
+        >
+          <Truck className="h-4 w-4" />
+          FedEx Billing
+        </button>
+        <button
+          type="button"
+          onClick={() => setInvoiceType(SUPPORTED_INVOICE_TYPES.ETSY)}
+          className={`flex-1 flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-[14px] text-[14px] font-semibold transition-all duration-300 ${
+            invoiceType === SUPPORTED_INVOICE_TYPES.ETSY
+              ? 'bg-[var(--color-brand-primary)] text-white shadow-md'
+              : 'bg-transparent text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)]'
+          }`}
+        >
+          <ShoppingBag className="h-4 w-4" />
+          Etsy Statement
+        </button>
       </div>
 
-      {/* Upload Zone */}
+      {/* Upload Zone / File Preview */}
       {!file ? (
-        <div className="rounded-[22px] p-2.5 mb-6">
-          <div
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`relative border-[1.5px] border-dashed rounded-2xl py-14 px-6 text-center cursor-pointer transition-all duration-200 ${
-              isDragging
-                ? 'border-brand-primary bg-brand-primary/5'
-                : 'border-brand-border hover:border-brand-primary/50 hover:bg-brand-primary/[0.02]'
-            }`}
-          >
-            <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv" className="hidden" />
-            <div className="mx-auto mb-[18px] flex h-[104px] w-[104px] items-center justify-center rounded-full bg-brand-gold/20">
-              <CsvFileIcon className="h-[52px] w-[52px] text-brand-primary" />
-            </div>
-            <p className="text-brand-primary font-bold text-[17px]">Drag &amp; Drop CSV File</p>
-            <p className="text-brand-muted text-sm mt-1">
-              or <span className="text-brand-primary underline underline-offset-2 font-medium">click to browse</span>
-            </p>
-            <p className="text-brand-muted/75 text-xs mt-2">Only CSV files are supported</p>
-          </div>
+        <div
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          
+          className={`relative h-[220px] flex flex-col items-center justify-center border-2 border-dashed rounded-[var(--radius-xl)] cursor-pointer transition-all duration-300 ${
+            isDragging
+              ? 'border-[var(--color-brand-primary)] bg-[var(--color-brand-background)]'
+              : 'border-[var(--color-brand-border)] bg-[var(--color-brand-background)]/40 hover:bg-[var(--color-brand-background)] hover:border-[var(--color-brand-primary)]/50'
+          }`}
+        >
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv" className="hidden" />
+          
+          <PremiumCloudIcon className="mb-4 w-24 h-16" />
+          
+          <p className="text-[var(--color-brand-primary)] font-bold text-[16px]">Drag & Drop your CSV file here</p>
+          <p className="text-[var(--color-brand-muted)] text-[14px] mt-1">
+            or <span className="text-[var(--color-brand-primary)] font-bold underline underline-offset-4 decoration-2 decoration-[var(--color-brand-primary)]/30 hover:decoration-[var(--color-brand-primary)] transition-colors">Browse Files</span>
+          </p>
+          <p className="text-[var(--color-brand-muted)] text-xs mt-4 font-medium opacity-75">CSV files only • Max size 20 MB</p>
         </div>
       ) : (
-        <div className="flex items-center justify-between p-4 mb-6 bg-brand-success/60 border border-brand-primary/15 rounded-2xl">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="p-2 bg-brand-card border border-brand-border rounded-lg flex items-center justify-center">
-              <CheckCircle2 className="h-5 w-5 text-brand-primary" />
+        <div className="h-[240px] flex flex-col justify-center">
+          <div className="flex items-center justify-between p-4 bg-[var(--color-brand-card)] border border-[var(--color-brand-border)] rounded-[var(--radius-xl)] shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-[var(--color-brand-success)] border border-[var(--color-brand-border)] rounded-xl flex items-center justify-center text-[var(--color-brand-primary)] font-bold text-[10px] tracking-wide">
+                CSV
+              </div>
+              <div>
+                <p className="text-[15px] font-bold text-[var(--color-brand-primary)]">{file.name}</p>
+                <p className="text-xs text-[var(--color-brand-muted)] mt-0.5">{(file.size / 1024).toFixed(1)} KB • Uploaded just now</p>
+              </div>
             </div>
-            <div className="truncate">
-              <p className="text-sm font-semibold text-brand-primary truncate">{file.name}</p>
-              <p className="text-xs text-brand-muted mt-0.5">{(file.size / 1024).toFixed(1)} KB</p>
+            
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-brand-success)] text-[var(--color-brand-primary)] text-[12px] font-bold rounded-full border border-[var(--color-brand-border)]">
+                <CheckCircle2 className="h-4 w-4" /> Ready to upload
+              </span>
+              <button
+                type="button"
+                onClick={clearFile}
+                disabled={isUploading}
+                className="p-2 text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)] hover:bg-[var(--color-brand-background)] transition-colors rounded-lg"
+                aria-label="Remove file"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={clearFile}
-            disabled={isUploading}
-            className="p-2 text-brand-muted hover:text-brand-primary transition-colors rounded-lg"
-            aria-label="Remove file"
-          >
-            <X className="h-4 w-4" />
-          </button>
         </div>
       )}
 
-     {/* Actions */}
-      <div className="flex gap-3">
+      {/* Actions */}
+      <div className="mt-6 pt-4 border-t border-[var(--color-brand-border)] flex items-center justify-end gap-3">
         <button
           type="button"
           onClick={onCancel}
           disabled={isUploading}
-          className="flex-1 py-4 px-4 rounded-full text-[15px] font-semibold text-brand-muted border border-brand-border bg-transparent hover:bg-brand-border/20 transition-colors disabled:opacity-50"
+          className="py-2.5 px-6 rounded-xl text-[14px] font-bold text-[var(--color-brand-muted)] border border-[var(--color-brand-border)] bg-transparent hover:bg-[var(--color-brand-background)] transition-colors disabled:opacity-50 shadow-sm"
         >
           Cancel
         </button>
@@ -260,10 +215,10 @@ export default function UploadCard({ onCancel }: { onCancel?: () => void }) {
           type="button"
           onClick={handleUpload}
           disabled={!file || isUploading}
-          className={`flex-[1.5] flex items-center justify-center gap-2 py-4 px-4 rounded-full text-[15px] font-semibold transition-all duration-200 ${
+          className={`flex items-center justify-center gap-2 py-2.5 px-6 rounded-xl text-[14px] font-bold transition-all duration-300 shadow-sm ${
             !file || isUploading
-              ? 'bg-brand-primary/25 text-white/70 cursor-not-allowed'
-              : 'bg-brand-primary/65 text-white hover:bg-brand-primary'
+              ? 'bg-[var(--color-brand-border)] text-white/70 cursor-not-allowed'
+              : 'bg-[var(--color-brand-primary)] text-white hover:bg-[var(--color-brand-primary-hover)] shadow-md'
           }`}
         >
           {isUploading ? (
@@ -279,6 +234,7 @@ export default function UploadCard({ onCancel }: { onCancel?: () => void }) {
           )}
         </button>
       </div>
+
     </div>
   );
 }

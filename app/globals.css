@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "../components"; 
 
 @theme {
   --color-brand-background: #F4EFE5;

@@ -1,27 +1,41 @@
 'use client';
 import { useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 
 export default function DashboardHeader() {
+  const pathname = usePathname();
+  const router = useRouter();
+  
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const isUpload = pathname?.includes('/upload');
+  const isOrders = pathname?.includes('/orders');
+  
+  const title = isUpload ? 'Upload Center' : isOrders ? 'Order History' : 'Dashboard';
+  const subtitle = isUpload 
+    ? 'Import your Etsy and FedEx CSV files into the database' 
+    : isOrders 
+    ? 'View, search, filter and export order-level sales data' 
+    : 'Overview of your business performance';
 
   const handleRefresh = () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
-    setTimeout(() => setIsRefreshing(false), 1000);
+    router.refresh(); // Tells Next.js to re-fetch server data
+    setTimeout(() => setIsRefreshing(false), 800);
   };
 
   return (
     <header className="flex flex-col md:flex-row md:items-end justify-between pb-6 mb-6">
       <div>
-        <h1 className="text-3xl font-bold text-[var(--color-brand-primary)] tracking-tight">Dashboard</h1>
-        <p className="text-[var(--color-brand-muted)] text-sm mt-1">Overview of your business performance</p>
+        <h1 className="text-3xl font-bold text-[var(--color-brand-primary)] tracking-tight">{title}</h1>
+        <p className="text-[var(--color-brand-muted)] text-sm mt-1">{subtitle}</p>
       </div>
       <div className="flex items-center gap-4 mt-4 md:mt-0 text-sm">
-        <span className="text-[var(--color-brand-muted)]">Last updated: --</span>
         <button
           onClick={handleRefresh}
           disabled={isRefreshing}
-          className="p-2 rounded-full hover:bg-[var(--color-brand-card)] transition-colors disabled:opacity-50 border border-transparent hover:border-[var(--color-brand-border)]"
+          className="p-2 rounded-full hover:bg-[var(--color-brand-background)] transition-colors disabled:opacity-50 border border-transparent hover:border-[var(--color-brand-border)]"
           title="Refresh Dashboard"
         >
           <svg className={`w-5 h-5 text-[var(--color-brand-primary)] ${isRefreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -29,7 +43,7 @@ export default function DashboardHeader() {
           </svg>
         </button>
         <div className="w-px h-6 bg-[var(--color-brand-border)] mx-1"></div>
-        <button className="p-2 rounded-full hover:bg-[var(--color-brand-card)] transition-colors border border-transparent hover:border-[var(--color-brand-border)]">
+        <button className="p-2 rounded-full hover:bg-[var(--color-brand-background)] transition-colors border border-transparent hover:border-[var(--color-brand-border)]">
           <svg className="w-5 h-5 text-[var(--color-brand-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>

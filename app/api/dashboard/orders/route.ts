@@ -8,18 +8,36 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const from = searchParams.get('from');
     const to = searchParams.get('to');
-    
-    // For the preview, we only want 5 records. Default to 10 for the full page later.
+    const q = searchParams.get('q') || '';
+
     const limit = parseInt(searchParams.get('limit') || '10');
     const page = parseInt(searchParams.get('page') || '1');
     const offset = (page - 1) * limit;
 
-    if (!from || !to) return NextResponse.json({ success: false }, { status: 400 });
+    if (!from || !to) {
+      return NextResponse.json(
+        { success: false, error: 'Missing dates' },
+        { status: 400 }
+      );
+    }
 
-    const data = await getOrders(from, to, limit, offset);
+      const { data, totalRecords } = await getOrders(
+      from,
+      to,
+      limit,
+      offset,
+      q
+    );
 
-    return NextResponse.json({ success: true, data });
+    return NextResponse.json({
+      success: true,
+      data,
+      totalRecords,
+    });
   } catch (error) {
-    return NextResponse.json({ success: false, error: 'Failed to load orders' }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: 'Failed to load orders' },
+      { status: 500 }
+    );
   }
 }

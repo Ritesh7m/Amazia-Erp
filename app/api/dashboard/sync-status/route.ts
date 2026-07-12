@@ -1,15 +1,27 @@
 import { NextResponse } from 'next/server';
-import { getSyncStatuses } from '@/lib/dashboard/dashboardQueries';
-import { SyncStatusResponse } from '@/lib/dashboard/dashboardTypes';
+import { getSyncDates } from '@/lib/dashboard/dashboardQueries'; 
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(): Promise<NextResponse<SyncStatusResponse>> {
+export async function GET() {
   try {
-    const statuses = await getSyncStatuses();
-    return NextResponse.json({ success: true, data: statuses });
+    const dates = await getSyncDates();
+
+    const formatDate = (dateStr: string | null) => {
+      if (!dateStr) return '--';
+      const d = new Date(dateStr);
+      return isNaN(d.getTime()) ? '--' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    };
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        etsy: formatDate(dates.etsy),
+        fedex: formatDate(dates.fedex),
+        inventory: 'Live Synced'
+      }
+    });
   } catch (error) {
-    console.error('[Dashboard API] Failed to fetch sync status:', error);
     return NextResponse.json({ success: false, error: 'Failed to load sync status' }, { status: 500 });
   }
 }

@@ -1,3 +1,4 @@
+//services\fedexParser.ts
 import csv from 'csv-parser';
 import { Readable } from 'stream';
 import { FedexRecord } from '@/types';
@@ -13,24 +14,28 @@ export const parseFedexCsv = async (buffer: Buffer): Promise<FedexRecord[]> => {
         mapHeaders: ({ header }) => header.trim()
       }))
       .on('data', (data) => {
-        // Strict mapping based on requested FedEx columns
         const invoiceType = data['Invoice Type'];
         const invoiceDate = data['Invoice Date'];
         const dueDate = data['Due Date'];
         const awb = data['Air Waybill Number'];
         const amountRaw = data['Air Waybill Total Amount'];
 
-        // Skip completely empty rows
         if (!invoiceType && !awb && !amountRaw) return;
 
         const amount = normalizeAmount(amountRaw);
         const bookExpenseCost = calculateBookExpenseCost(amount);
 
+        // Fix Excel's scientific notation corruption (converts "8.90E+11" back to "890000000000")
+        let formattedAwb = awb ? String(awb).trim() : '';
+        if (formattedAwb.toUpperCase().includes('E')) {
+          formattedAwb = Number(formattedAwb).toLocaleString('fullwide', { useGrouping: false });
+        }
+
         results.push({
           invoice_type: invoiceType ? String(invoiceType).trim() : '',
           invoice_date: normalizeDate(invoiceDate) || '',
           due_date: normalizeDate(dueDate) || '',
-          awb_number: awb ? String(awb).trim() : '',
+          awb_number: formattedAwb,
           air_waybill_total_amount: amount,
           book_expense_cost: bookExpenseCost
         });
