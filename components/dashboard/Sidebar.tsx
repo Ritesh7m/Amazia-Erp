@@ -37,11 +37,58 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
       
       <aside className={`fixed top-0 left-0 h-screen bg-[var(--color-brand-card)] border-r border-[var(--color-brand-border)] z-50 transition-all duration-300 flex flex-col ${isCollapsed ? 'w-20' : 'w-72'} ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         
-        {/* Logo Section */}
-        <div className="h-20 flex items-center px-6 border-b border-[var(--color-brand-border)]">
-          <div className="w-8 h-8 rounded bg-[var(--color-brand-gold)] flex-shrink-0"></div>
-          {!isCollapsed && <span className="ml-3 font-bold text-xl text-[var(--color-brand-primary)] tracking-tight">AMAZIA ERP</span>}
-        </div>
+     {/* Logo Section */}
+<div className="h-20 flex items-center px-6 border-b border-[var(--color-brand-border)]">
+
+  {/* Amazia Shipping Logo */}
+  <div className="w-10 h-10 rounded-lg bg-[var(--color-brand-gold)] flex items-center justify-center flex-shrink-0">
+
+    <svg
+      className="w-6 h-6 text-[var(--color-brand-primary)]"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M21 8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16V8z"
+      />
+
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M3.27 6.96L12 12l8.73-5.04"
+      />
+
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M12 22V12"
+      />
+
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M7.5 4.27L16.5 9.5"
+      />
+    </svg>
+
+  </div>
+
+  {!isCollapsed && (
+    <span className="ml-3 font-bold text-xl text-[var(--color-brand-primary)] tracking-tight">
+      AMAZIA ERP
+    </span>
+  )}
+
+</div>
 
        {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-2">
@@ -54,11 +101,7 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
             <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
             {!isCollapsed && <span className="ml-3 font-medium">Upload</span>}
           </Link>
-
-          <Link href="/inventory" className={`flex items-center px-4 py-3 rounded-[var(--radius-xl)] transition-colors ${isActive('/inventory') ? 'bg-[var(--color-brand-primary)] text-white' : 'text-[var(--color-brand-muted)] hover:bg-[var(--color-brand-background)]'}`}>
-            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
-            {!isCollapsed && <span className="ml-3 font-medium">Inventory</span>}
-          </Link>
+       
         </nav>
 
         {/* Sync Status - Bottom */}
@@ -90,13 +133,13 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
         )}
 
         {/* Collapse Toggle */}
-        <button 
+        {/* <button 
           onClick={() => setIsCollapsed(!isCollapsed)}
           className="p-4 border-t border-[var(--color-brand-border)] flex items-center text-[var(--color-brand-muted)] hover:bg-[var(--color-brand-background)] transition-colors"
         >
           <svg className={`w-5 h-5 flex-shrink-0 transition-transform ${isCollapsed ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
           {!isCollapsed && <span className="ml-3 font-medium">Collapse</span>}
-        </button>
+        </button> */}
       </aside>
     </>
   );

@@ -1,4 +1,3 @@
-// services\inventoryProcessor.ts
 import { RawSheetRow, InventoryRecord } from '@/types/inventory';
 import { inventoryRowSchema } from '@/utils/inventoryValidation';
 
@@ -26,7 +25,6 @@ export const processAndAggregateInventory = (
     // 2. STRICT VALIDATION: This drops the invalid names
     const validation = inventoryRowSchema.safeParse(row);
     if (!validation.success) {
-     
       skippedCount++;
       continue;
     }
@@ -36,12 +34,16 @@ export const processAndAggregateInventory = (
     const quantity = parseFloat(row.quantity);
 
     // Business Key for Aggregation
-    const hashKey = `${normalizedOrderId}_${row.materialType}_${row.category}_${row.color}`;
+    // FIX: We now group strictly by Order ID so quantities merge into one row
+    const hashKey = normalizedOrderId;
 
     if (aggregationMap.has(hashKey)) {
       const existing = aggregationMap.get(hashKey)!;
+      // Add the new quantity to the existing total
       existing.quantity += quantity;
-      // existing.material_cost = existing.quantity * MATERIAL_COST_MULTIPLIER;
+      
+      // Note: The material_type, category, and color will simply stay 
+      // as whatever the very first item in the order was (e.g., "Cotton", "Lines", "Green").
     } else {
       aggregationMap.set(hashKey, {
         order_no: normalizedOrderId,
@@ -49,7 +51,6 @@ export const processAndAggregateInventory = (
         category: row.category.trim(),
         color: row.color.trim(),
         quantity: quantity,
-        // material_cost: quantity * MATERIAL_COST_MULTIPLIER,
       });
     }
   }

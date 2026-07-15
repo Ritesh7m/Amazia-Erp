@@ -5,81 +5,239 @@ import { fetchQuery } from '@/database';
 // Centralized material cost multiplier
 const MATERIAL_COST_RATE = 250;
 
+/* ==========================================================================
+   1. HIGH-LEVEL AGGREGATE TOTALS
+   ========================================================================== */
+
 /**
  * Fetch total sales within date range.
  */
-export async function getTotalSales(
-  startDate: string,
-  endDate: string
-): Promise<number> {
+export async function getTotalSales(startDate: string, endDate: string): Promise<number> {
   const query = `
     SELECT COALESCE(SUM(net_amt), 0) AS total_sales
     FROM etsy_statement
     WHERE date >= ? AND date <= ?
   `;
-
-  const result = await fetchQuery<{ total_sales: number }>(query, [
-    startDate,
-    endDate,
-  ]);
-
+  const result = await fetchQuery<{ total_sales: number }>(query, [startDate, endDate]);
   return result[0]?.total_sales || 0;
 }
 
 /**
  * Fetch total FedEx expenses within date range.
  */
-export async function getFedExExpenses(
-  startDate: string,
-  endDate: string
-): Promise<number> {
+export async function getFedExExpenses(startDate: string, endDate: string): Promise<number> {
   const query = `
-    SELECT COALESCE(SUM(book_expense_cost), 0) AS total_fedex
+    SELECT COALESCE(SUM(air_waybill_total_amount), 0) AS total_fedex
     FROM fedex_billing
     WHERE invoice_date >= ? AND invoice_date <= ?
   `;
-
-  const result = await fetchQuery<{ total_fedex: number }>(query, [
-    startDate,
-    endDate,
-  ]);
-
+  const result = await fetchQuery<{ total_fedex: number }>(query, [startDate, endDate]);
   return result[0]?.total_fedex || 0;
 }
 
 /**
  * Fetch total material expenses within date range.
  */
-export async function getMaterialExpenses(
-  startDate: string,
-  endDate: string
-): Promise<number> {
+export async function getMaterialExpenses(startDate: string, endDate: string): Promise<number> {
   const query = `
     SELECT COALESCE(SUM(i.quantity * ?), 0) AS total_material_cost
     FROM etsy_statement e
-    JOIN inventory_table i
-      ON e.order_no = i.order_no
+    JOIN inventory_table i ON e.order_no = i.order_no
     WHERE e.date >= ? AND e.date <= ?
   `;
-
   const result = await fetchQuery<{ total_material_cost: number }>(query, [
     MATERIAL_COST_RATE,
     startDate,
     endDate,
   ]);
-
   return result[0]?.total_material_cost || 0;
 }
 
+/* ==========================================================================
+   2. MONTHLY GROUPINGS (FOR CHARTS)
+   ========================================================================== */
+
 /**
- * Fetch sync timestamps.
+ * Fetch monthly grouped sales.
  */
-export async function getSyncStatuses() {
+export async function getMonthlySales(startDate: string, endDate: string) {
   const query = `
-    SELECT sync_name, last_sync_at
-    FROM sync_metadata
+    SELECT
+      strftime(date, '%Y-%m') AS month,
+      COALESCE(SUM(net_amt), 0) AS total
+    FROM etsy_statement
+    WHERE date >= ? AND date <= ?
+    GROUP BY strftime(date, '%Y-%m')
+    ORDER BY month
+  `;
+  return await fetchQuery<{ month: string; total: number }>(query, [startDate, endDate]);
+}
+
+/**
+ * Fetch monthly grouped FedEx expenses.
+ */
+export async function getMonthlyFedEx(startDate: string, endDate: string) {
+  const query = `
+    SELECT
+      strftime(invoice_date, '%Y-%m') AS month,
+      COALESCE(SUM(air_waybill_total_amount), 0) AS total
+    FROM fedex_billing
+    WHERE invoice_date >= ? AND invoice_date <= ?
+    GROUP BY strftime(invoice_date, '%Y-%m')
+    ORDER BY month
+  `;
+  return await fetchQuery<{ month: string; total: number }>(query, [startDate, endDate]);
+}
+
+/**
+ * Fetch monthly grouped material expenses.
+ */
+export async function getMonthlyMaterials(startDate: string, endDate: string) {
+  const query = `
+    SELECT
+      strftime(e.date, '%Y-%m') AS month,
+      COALESCE(SUM(i.quantity * ?), 0) AS total
+    FROM etsy_statement e
+    JOIN inventory_table i ON e.order_no = i.order_no
+    WHERE e.date >= ? AND e.date <= ?
+    GROUP BY strftime(e.date, '%Y-%m')
+    ORDER BY month
+  `;
+  return await fetchQuery<{ month: string; total: number }>(query, [
+    MATERIAL_COST_RATE,
+    startDate,
+    endDate,
+  ]);
+}
+
+/* ==========================================================================
+   3. COMPLEX CALCULATIONS (FRACTIONAL COSTS)
+   ========================================================================== */
+
+/**
+ * Calculates perfectly fractional FedEx costs and maps them to the exact Sale Date.
+ */
+export async function getFractionalOrderCosts(startDate: string, endDate: string) {
+  const query = `
+    WITH awb_order_counts AS (
+      SELECT awb_number, COUNT(DISTINCT order_no) as order_count
+      FROM order_awb_mapping
+      GROUP BY awb_number
+    ),
+    fractional_fedex AS (
+      SELECT 
+        m.order_no,
+        SUM(f.air_waybill_total_amount / c.order_count) as allocated_duty_cost
+      FROM order_awb_mapping m
+      JOIN fedex_billing f ON m.awb_number = f.awb_number
+      JOIN awb_order_counts c ON m.awb_number = c.awb_number
+      GROUP BY m.order_no
+    )
+    SELECT 
+      e.date AS sale_date,
+      e.order_no,
+      e.net_amt AS sales,
+      COALESCE(SUM(i.quantity * ?), 0) AS material_cost,
+      COALESCE(ff.allocated_duty_cost, 0) AS duty_cost
+    FROM etsy_statement e
+    LEFT JOIN inventory_table i ON e.order_no = i.order_no
+    LEFT JOIN fractional_fedex ff ON e.order_no = ff.order_no
+    WHERE e.date >= ? AND e.date <= ?
+    GROUP BY e.date, e.order_no, e.net_amt, ff.allocated_duty_cost
+  `;
+  return await fetchQuery<any>(query, [MATERIAL_COST_RATE, startDate, endDate]); 
+}
+
+/* ==========================================================================
+   4. TABLE DATA & PAGINATION
+   ========================================================================== */
+
+/**
+ * Fetch paginated Etsy orders with material costs.
+ */
+export async function getOrders(
+  startDate: string,
+  endDate: string,
+  limit: number,
+  offset: number = 0,
+  searchQuery: string = ''
+) {
+  const hasSearch = searchQuery.trim().length > 0;
+  const searchCondition = hasSearch ? `AND CAST(e.order_no AS VARCHAR) ILIKE ?` : '';
+
+  const dataQuery = `
+    SELECT
+      CAST(e.order_no AS VARCHAR) AS order_no,
+      CAST(e.date AS VARCHAR) AS sale_date,
+      COALESCE(TRY_CAST(REPLACE(CAST(e.net_amt AS VARCHAR), ',', '') AS DOUBLE), 0) AS sales,
+      COALESCE(SUM(COALESCE(TRY_CAST(i.quantity AS DOUBLE), 0) * ?), 0) AS material_cost
+    FROM etsy_statement e
+    LEFT JOIN inventory_table i ON CAST(e.order_no AS VARCHAR) = CAST(i.order_no AS VARCHAR)
+    WHERE TRY_CAST(e.date AS DATE) BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)
+      ${searchCondition}
+    GROUP BY e.order_no, e.date, e.net_amt
+    ORDER BY TRY_CAST(e.date AS DATE) DESC
+    LIMIT ? OFFSET ?
   `;
 
+  const countQuery = `
+    SELECT COUNT(DISTINCT CAST(e.order_no AS VARCHAR)) AS total
+    FROM etsy_statement e
+    WHERE TRY_CAST(e.date AS DATE) BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)
+      ${searchCondition}
+  `;
+
+  const dataParams: unknown[] = [MATERIAL_COST_RATE, startDate, endDate];
+  const countParams: unknown[] = [startDate, endDate];
+
+  if (hasSearch) {
+    const searchValue = `%${searchQuery.trim()}%`;
+    dataParams.push(searchValue);
+    countParams.push(searchValue);
+  }
+
+  dataParams.push(Number(limit), Number(offset));
+
+  try {
+    const [rows, countResult] = await Promise.all([
+      fetchQuery<any>(dataQuery, dataParams),
+      fetchQuery<any>(countQuery, countParams),
+    ]);
+
+    const data = rows.map((row) => {
+      const sales = Number(row.sales ?? 0);
+      const materialCost = Number(row.material_cost ?? 0);
+      const profit = sales - materialCost;
+
+      return {
+        orderNo: String(row.order_no ?? ''),
+        saleDate: String(row.sale_date ?? ''),
+        sales,
+        materialCost,
+        estimatedProfitBeforeShipping: profit,
+        status: profit > 0 ? 'Profitable' : profit < 0 ? 'Loss' : 'Neutral',
+      };
+    });
+
+    return {
+      data,
+      totalRecords: Number(countResult[0]?.total ?? 0),
+    };
+  } catch (error) {
+    console.error('GET ORDERS DATABASE ERROR:', error);
+    throw error;
+  }
+}
+
+/* ==========================================================================
+   5. SYNC TIMESTAMPS & LOGS
+   ========================================================================== */
+
+/**
+ * Fetch detailed sync statuses for various providers.
+ */
+export async function getSyncStatuses() {
+  const query = `SELECT sync_name, last_sync_at FROM sync_metadata`;
   const historyQuery = `
     SELECT invoice_type, MAX(created_at) AS last_import_at
     FROM import_history
@@ -93,164 +251,21 @@ export async function getSyncStatuses() {
   ]);
 
   return {
-    inventory:
-      syncData.find((s) => s.sync_name === 'inventory')?.last_sync_at || null,
-    etsy:
-      importData.find((i) => i.invoice_type === 'ETSY')?.last_import_at || null,
-    fedex:
-      importData.find((i) => i.invoice_type === 'FEDEX')?.last_import_at || null,
+    inventory: syncData.find((s) => s.sync_name === 'inventory')?.last_sync_at || null,
+    etsy: importData.find((i) => i.invoice_type === 'ETSY')?.last_import_at || null,
+    fedex: importData.find((i) => i.invoice_type === 'FEDEX')?.last_import_at || null,
   };
 }
 
 /**
- * Fetch monthly grouped sales.
- */
-export async function getMonthlySales(
-  startDate: string,
-  endDate: string
-) {
-  const query = `
-    SELECT
-      strftime(date, '%Y-%m') AS month,
-      COALESCE(SUM(net_amt), 0) AS total
-    FROM etsy_statement
-    WHERE date >= ? AND date <= ?
-    GROUP BY strftime(date, '%Y-%m')
-    ORDER BY month
-  `;
-
-  return await fetchQuery<{ month: string; total: number }>(query, [
-    startDate,
-    endDate,
-  ]);
-}
-
-/**
- * Fetch monthly grouped FedEx expenses.
- */
-export async function getMonthlyFedEx(
-  startDate: string,
-  endDate: string
-) {
-  const query = `
-    SELECT
-      strftime(invoice_date, '%Y-%m') AS month,
-      COALESCE(SUM(book_expense_cost), 0) AS total
-    FROM fedex_billing
-    WHERE invoice_date >= ? AND invoice_date <= ?
-    GROUP BY strftime(invoice_date, '%Y-%m')
-    ORDER BY month
-  `;
-
-  return await fetchQuery<{ month: string; total: number }>(query, [
-    startDate,
-    endDate,
-  ]);
-}
-
-/**
- * Fetch monthly grouped material expenses.
- */
-export async function getMonthlyMaterials(
-  startDate: string,
-  endDate: string
-) {
-  const query = `
-    SELECT
-      strftime(e.date, '%Y-%m') AS month,
-      COALESCE(SUM(i.quantity * ?), 0) AS total
-    FROM etsy_statement e
-    JOIN inventory_table i
-      ON e.order_no = i.order_no
-    WHERE e.date >= ? AND e.date <= ?
-    GROUP BY strftime(e.date, '%Y-%m')
-    ORDER BY month
-  `;
-
-  return await fetchQuery<{ month: string; total: number }>(query, [
-    MATERIAL_COST_RATE,
-    startDate,
-    endDate,
-  ]);
-}
-
-/**
- * Fetches paginated orders with their material cost joined from inventory.
- */
-/**
- * Fetches paginated orders with their material cost joined from inventory.
- */
-/**
- * Fetches paginated orders with their material cost joined from inventory.
- */
-export async function getOrders(startDate: string, endDate: string, limit: number, offset: number = 0, searchQuery: string = '') {
-  
-  const searchFilter = searchQuery ? `AND e.order_no LIKE '%${searchQuery}%'` : '';
-
-  const dataQuery = `
-    SELECT 
-      e.order_no AS "orderNo", 
-      e.date AS "saleDate", 
-      CAST(REPLACE(CAST(e.net_amt AS TEXT), ',', '') AS REAL) AS "sales", 
-      COALESCE(SUM(i.quantity * ?), 0) AS "materialCost"
-    FROM etsy_statement e
-    LEFT JOIN inventory_table i ON e.order_no = i.order_no
-    WHERE e.date >= ? AND e.date <= ? ${searchFilter}
-    GROUP BY e.order_no, e.date, e.net_amt
-    ORDER BY e.date DESC
-    LIMIT ? OFFSET ?
-  `;
-  
-  const countQuery = `
-    SELECT COUNT(DISTINCT order_no) as total
-    FROM etsy_statement e
-    WHERE date >= ? AND date <= ? ${searchFilter}
-  `;
-  
-  try {
-    const [rows, countResult] = await Promise.all([
-      fetchQuery<any>(dataQuery, [MATERIAL_COST_RATE, startDate, endDate, Number(limit), Number(offset)]),
-      fetchQuery<{ total: number }>(countQuery, [startDate, endDate])
-    ]);
-    
-    const totalRecords = countResult[0]?.total || 0;
-    
-    const data = rows.map(r => {
-      // Fallbacks added to ensure we read the property regardless of how the database formats the casing
-      const orderNo = r.orderNo || r.orderno || r.ORDERNO || '';
-      const saleDate = r.saleDate || r.saledate || r.SALEDATE || '';
-      const sales = Number(r.sales || r.SALES || 0);
-      const materialCost = Number(r.materialCost || r.materialcost || r.MATERIALCOST || 0);
-      
-      const profit = sales - materialCost;
-      return {
-        orderNo,
-        saleDate,
-        sales,
-        materialCost,
-        estimatedProfitBeforeShipping: profit,
-        status: profit > 0 ? 'Profitable' : 'Neutral'
-      };
-    });
-
-    return { data, totalRecords };
-  } catch (error) {
-    console.error("Error fetching orders:", error);
-    return { data: [], totalRecords: 0 };
-  }
-}
-
-/**
- * Fetch sync timestamps based on database upload time (created_at).
+ * Fetch simple sync timestamps based on database upload time (created_at).
  */
 export async function getSyncDates() {
   try {
-    // We query MAX(created_at) and alias it uniformly as "lastUpload"
     const etsy = await fetchQuery<any>('SELECT MAX(created_at) as "lastUpload" FROM etsy_statement').catch(() => []);
     const fedex = await fetchQuery<any>('SELECT MAX(created_at) as "lastUpload" FROM fedex_billing').catch(() => []);
     const inventory = await fetchQuery<any>('SELECT MAX(created_at) as "lastUpload" FROM inventory_table').catch(() => []);
 
-    // Helper function to safely extract the date, avoiding capitalization errors from the DB
     const extractDate = (result: any[]) => {
       if (!result || !result[0]) return null;
       return result[0].lastUpload || result[0].lastupload || result[0].LASTUPLOAD || null;
@@ -282,8 +297,5 @@ export async function getActivityLogs(limit: number, offset: number = 0) {
     ORDER BY timestamp DESC
     LIMIT ? OFFSET ?
   `;
-  
   return await fetchQuery<any>(query, [limit, offset]);
-}
-
-
+} 

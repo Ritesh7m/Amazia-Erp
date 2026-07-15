@@ -2,7 +2,7 @@
 import { ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { ExpenseBreakdownPoint } from '@/lib/dashboard/dashboardTypes';
 
-const COLORS = ['#184B4D', '#E4D4BA']; // FedEx (Dark), Material (Gold)
+const COLORS = ['#184B4D', '#E4D4BA']; 
 
 export default function ExpenseBreakdownChart({ data, total, isLoading }: { data: ExpenseBreakdownPoint[], total: number, isLoading: boolean }) {
   if (isLoading) {

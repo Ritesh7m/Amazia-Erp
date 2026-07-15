@@ -19,14 +19,29 @@ function FiltersContent() {
   // Helper to format date as YYYY-MM-DD
   const formatDate = (date: Date) => date.toISOString().split('T')[0];
 
-  // Initialize default dates if missing from URL
+  // Initialize default dates or read from URL on load
   useEffect(() => {
-    if (!searchParams.get('from') || !searchParams.get('to')) {
+    const fromParam = searchParams.get('from');
+    const toParam = searchParams.get('to');
+
+    if (!fromParam || !toParam) {
       handleDateRangeChange('12M');
     } else {
       setSearchQuery(searchParams.get('q') || '');
+      
+      // Calculate the difference in days to figure out which button to highlight
+      const d1 = new Date(fromParam);
+      const d2 = new Date(toParam);
+      const diffDays = Math.round(Math.abs((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)));
+
+      if (diffDays === 7) setActiveRange('7D');
+      else if (diffDays >= 28 && diffDays <= 31) setActiveRange('30D');
+      else if (diffDays >= 89 && diffDays <= 93) setActiveRange('3M');
+      else if (diffDays >= 180 && diffDays <= 184) setActiveRange('6M');
+      else if (diffDays >= 364 && diffDays <= 366) setActiveRange('12M');
+      else setActiveRange('Custom'); 
     }
-  }, []);
+  }, [searchParams]);
 
   const handleDateRangeChange = (range: string) => {
     setActiveRange(range);
@@ -40,7 +55,7 @@ function FiltersContent() {
       case '6M': from.setMonth(to.getMonth() - 6); break;
       case '12M': from.setFullYear(to.getFullYear() - 1); break;
       case 'FY':
-       
+        // Indian Financial Year: April 1st to March 31st
         const currentMonth = to.getMonth();
         const startYear = currentMonth >= 3 ? to.getFullYear() : to.getFullYear() - 1;
         from = new Date(startYear, 3, 1); 

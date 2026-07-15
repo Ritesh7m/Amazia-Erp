@@ -1,59 +1,80 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getMonthlySales, getMonthlyFedEx, getMonthlyMaterials } from '@/lib/dashboard/dashboardQueries';
 
-export const dynamic = 'force-dynamic';
+// Formats '2026-06' into 'Jun 2026'
+const formatMonth = (yyyyMm: string) => {
+  const [year, month] = yyyyMm.split('-');
+  const date = new Date(parseInt(year), parseInt(month) - 1);
+  return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+};
 
-function generateMonthList(start: string, end: string) {
+// Generates an array of every "YYYY-MM" between the start and end dates
+const generateMonthRange = (startDateStr: string, endDateStr: string) => {
+  const start = new Date(startDateStr);
+  const end = new Date(endDateStr);
   const months = [];
-  const curr = new Date(start);
-  curr.setDate(1); // Set to 1st to avoid timezone skips at end-of-month
-  const endDate = new Date(end);
-  endDate.setDate(1);
   
-  while (curr <= endDate) {
-    const id = curr.toISOString().slice(0, 7); // "YYYY-MM"
-    const label = curr.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); // "Apr 2025"
-    months.push({ id, label });
-    curr.setMonth(curr.getMonth() + 1);
+  // Set to the 1st of the month to avoid timezone/day-skipping edge cases
+  let current = new Date(start.getFullYear(), start.getMonth(), 1);
+  const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+  
+  while (current <= endMonth) {
+    const year = current.getFullYear();
+    const month = String(current.getMonth() + 1).padStart(2, '0');
+    months.push(`${year}-${month}`);
+    // Move to the next month
+    current.setMonth(current.getMonth() + 1);
   }
+  
   return months;
-}
+};
 
-export async function GET(req: NextRequest) {
+export async function GET(request: Request) {
   try {
-    const { searchParams } = req.nextUrl;
+    const { searchParams } = new URL(request.url);
     const from = searchParams.get('from');
     const to = searchParams.get('to');
-    if (!from || !to) return NextResponse.json({ success: false }, { status: 400 });
 
-    const [sales, fedex, materials] = await Promise.all([
-      getMonthlySales(from, to),
-      getMonthlyFedEx(from, to),
-      getMonthlyMaterials(from, to)
-    ]);
+    if (!from || !to) {
+      return NextResponse.json({ success: false, error: 'Missing date range' }, { status: 400 });
+    }
 
-    const timeline = generateMonthList(from, to);
-    
-    const chartData = timeline.map(m => {
-      const s = sales.find(x => x.month === m.id)?.total || 0;
-      const f = fedex.find(x => x.month === m.id)?.total || 0;
-      const mat = materials.find(x => x.month === m.id)?.total || 0;
+    const monthlySales = await getMonthlySales(from, to);
+    const monthlyFedEx = await getMonthlyFedEx(from, to);
+    const monthlyMaterials = await getMonthlyMaterials(from, to);
+
+    // Get a continuous sequence of months regardless of whether data exists
+    const allMonths = generateMonthRange(from, to);
+
+    const chartData = allMonths.map(month => {
+      // Look up the data for this specific month (will be undefined if nothing happened)
+      const salesItem = monthlySales.find(s => s.month === month);
+      const fedexItem = monthlyFedEx.find(f => f.month === month);
+      const materialItem = monthlyMaterials.find(m => m.month === month);
+
+      // Default to 0 if the item doesn't exist
+      const salesAmount = salesItem?.total || 0;
+      const dutyCost = fedexItem?.total || 0;
+      const materialCost = materialItem?.total || 0;
       
-      const expenses = f + mat;
-      const profit = s - expenses;
-      const margin = s === 0 ? 0 : Math.round((profit / s) * 1000) / 10;
+      const expenses = dutyCost + materialCost;
+      const profit = salesAmount - expenses;
+      const margin = salesAmount > 0 ? ((profit / salesAmount) * 100).toFixed(1) : 0;
 
       return {
-        month: m.label,
-        sales: s,
-        expenses,
-        profit,
-        margin
+        month: formatMonth(month),
+        sales: salesAmount,
+        expenses: expenses,
+        materialCost: materialCost, 
+        dutyCost: dutyCost,         
+        profit: profit,
+        margin: margin
       };
     });
 
     return NextResponse.json({ success: true, data: chartData });
   } catch (error) {
+    console.error('API Error:', error);
     return NextResponse.json({ success: false, error: 'Failed to fetch performance data' }, { status: 500 });
   }
 }

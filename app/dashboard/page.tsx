@@ -7,8 +7,6 @@ import DashboardFilters from '@/components/dashboard/DashboardFilters';
 import MetricCard from '@/components/dashboard/MetricCard';
 import BusinessPerformanceChart from '@/components/dashboard/BusinessPerformanceChart';
 import ExpenseBreakdownChart from '@/components/dashboard/ExpenseBreakdownChart';
-import RecentOrders from '@/components/dashboard/RecentOrders';
-import RecentActivity from '@/components/dashboard/RecentActivity';
 
 // Types
 import { 
@@ -147,15 +145,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Tables Grid (Step 6) */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
-        <div className="xl:col-span-2">
-          <RecentOrders data={ordersData} isLoading={loading} />
-        </div>
-        <div>
-          <RecentActivity data={activityData} isLoading={loading} />
-        </div>
-      </div>
+
     </div>
   );
 }
