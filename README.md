@@ -1,14 +1,14 @@
 # Amazia ERP
 
-Amazia ERP is a billing, expense, inventory, and business analytics platform built using Next.js, TypeScript, Tailwind CSS, and DuckDB.
+Amazia ERP is a billing, expense, inventory, financial reconciliation, and business analytics platform built using Next.js, TypeScript, Tailwind CSS, and DuckDB.
 
-The application imports Etsy sales statements and FedEx billing CSV files, synchronizes inventory data from Google Sheets, processes and normalizes business data, stores curated records in DuckDB, and presents sales, expenses, profit, and operational insights through a minimal business dashboard.
+The application imports Etsy sales statements and FedEx billing CSV files, synchronizes inventory information from Google Sheets, maps Etsy order numbers to FedEx Air Waybill (AWB) numbers, calculates order-level expenses and profitability, and displays business insights through a clean analytical dashboard.
 
-The system is designed so that the dashboard reads only from DuckDB. External sources such as Google Sheets are handled independently through a scheduled synchronization worker and are not queried when the dashboard loads.
+The system is designed so that the dashboard reads only from DuckDB. External sources such as Google Sheets are processed independently through a scheduled synchronization worker and are not queried when the dashboard loads.
 
 ---
 
-## Project Overview
+# Project Overview
 
 Amazia ERP currently contains the following modules:
 
@@ -16,13 +16,18 @@ Amazia ERP currently contains the following modules:
 2. Etsy Statement Import
 3. FedEx Billing Import
 4. Google Sheets Inventory Synchronization
-5. DuckDB Data Storage
-6. Background Inventory Scheduler
-7. Search, Filtering, Reporting, and Pagination
+5. Order-to-AWB Shipment Mapping
+6. Accounting and Reconciliation Engine
+7. DuckDB Data Storage
+8. Background Inventory Scheduler
+9. Order and AWB Search
+10. Order-Level Financial Analysis
+11. Date Filtering
+12. Financial CSV Report Export
 
 ---
 
-## Technology Stack
+# Technology Stack
 
 | Layer | Technology |
 |---|---|
@@ -42,247 +47,139 @@ Amazia ERP currently contains the following modules:
 
 ---
 
-## Core Architecture
+# Core Architecture
 
 ```text
-                         AMAZIA ERP
+                               AMAZIA ERP
+                                    │
+              ┌─────────────────────┴────────────────────┐
+              │                                          │
+              ▼                                          ▼
+     Next.js Web Application                  Inventory Scheduler
+          npm run dev                          npm run scheduler
+              │                                          │
+              │                                          │
+              ├── Dashboard                              ├── Runs every 6 hours
+              ├── Upload Interface                       ├── Reads Google Sheets
+              ├── Etsy Import API                        ├── Reads only new rows
+              ├── FedEx Import API                       ├── Normalizes order IDs
+              ├── Dashboard APIs                         ├── Aggregates quantities
+              ├── Search API                             └── Saves data to DuckDB
+              ├── Shipment Mapping
+              ├── Financial Reporting
+              └── DuckDB Reads/Writes
                               │
-          ┌───────────────────┴───────────────────┐
-          │                                       │
-          ▼                                       ▼
- Next.js Web Application              Inventory Scheduler Worker
-      npm run dev                          npm run scheduler
-          │                                       │
-          │                                       │
-          ├── Dashboard                            ├── Runs every 6 hours
-          ├── Upload Interface                     ├── Reads Google Sheets
-          ├── Etsy Import API                      ├── Reads only new rows
-          ├── FedEx Import API                     ├── Normalizes order numbers
-          ├── Dashboard APIs                       ├── Aggregates quantities
-          └── DuckDB Reads/Writes                  └── Saves data to DuckDB
-                         │
-                         ▼
-                      DuckDB
-                         │
-          ┌──────────────┼──────────────┐
-          │              │              │
-          ▼              ▼              ▼
-     Etsy Sales     FedEx Expenses    Inventory
+                              ▼
+                           DuckDB
+                              │
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+          ▼                   ▼                   ▼
+      Etsy Sales        FedEx Expenses       Inventory Data
+          │                   │                   │
+          └───────────────────┼───────────────────┘
+                              │
+                              ▼
+                    Order-to-AWB Mapping
+                              │
+                              ▼
+                 Accounting Reconciliation
+                              │
+                              ▼
+        Dashboard, Search, Details, and CSV Reports
 ```
 
 ---
 
-## Application Workflow
+# End-to-End Application Workflow
 
-### Sales Workflow
-
-```text
-Etsy CSV Statement
-        │
-        ▼
-Upload from the application
-        │
-        ▼
-Validate CSV file
-        │
-        ▼
-Parse statement rows
-        │
-        ▼
-Keep Sale transactions
-        │
-        ▼
-Extract required values
-        │
-        ▼
-Normalize dates and amounts
-        │
-        ▼
-Validate order numbers
-        │
-        ▼
-Save curated sales records to DuckDB
-        │
-        ▼
-Dashboard reads sales data
-```
-
-### Expense Workflow
+The application is divided into five major phases:
 
 ```text
-FedEx Billing CSV
-        │
-        ▼
-Upload from the application
-        │
-        ▼
-Validate CSV file and headers
-        │
-        ▼
-Parse billing records
-        │
-        ▼
-Map required FedEx columns
-        │
-        ▼
-Normalize dates and monetary values
-        │
-        ▼
-Calculate Book Expense Cost
-        │
-        ▼
-Validate all rows
-        │
-        ▼
-Insert all valid records using a transaction
-        │
-        ▼
-Dashboard reads expense data
-```
-
-### Inventory Workflow
-
-```text
-Google Sheet
-     │
-     │ Read only
-     ▼
-Inventory Scheduler
-Runs every 6 hours
-     │
-     ▼
-Read last_processed_row from DuckDB
-     │
-     ▼
-Get the current last row from the sheet
-     │
-     ▼
-Check for newly appended rows
-     │
-     ├── No new rows
-     │       │
-     │       ▼
-     │    End synchronization
-     │
-     └── New rows
-             │
-             ▼
-       Read only new rows
-             │
-             ▼
-       Validate source values
-             │
-             ▼
-       Normalize order numbers
-             │
-             ▼
-       Aggregate order quantities
-             │
-             ▼
-       Save records to DuckDB
-             │
-             ▼
-       Update last_processed_row
+Phase 1
+Data Ingestion and Synchronization
+                │
+                ▼
+Phase 2
+Accounting and Reconciliation Engine
+                │
+                ▼
+Phase 3
+Dashboard and Business Analytics
+                │
+                ▼
+Phase 4
+Search and Order Investigation
+                │
+                ▼
+Phase 5
+Financial Report Export
 ```
 
 ---
 
-# Dashboard
+# Phase 1: Data Ingestion and Synchronization
 
-The dashboard provides a consolidated overview of sales, expenses, profitability, inventory costs, and recent business activity.
+Amazia ERP acts as a central data hub.
 
-## Dashboard Features
+The application imports raw information from multiple independent sources, standardizes the data, validates it, and stores curated records inside DuckDB.
 
-- Total Sales
-- Total Expenses
-- Gross Profit
-- Profit Margin
-- Monthly Business Performance
-- Sales and Expense Comparison
-- Expense Breakdown
-- Recent Orders
-- Recent Import Activity
-- Inventory Synchronization Status
-- Date-range filtering
-- Quick time filters
-- Search by:
-  - Order number
-  - Air Waybill number
-  - Invoice type
-- Report export
-- Configurable chart period
-- Paginated data tables
+The main data sources are:
 
-The dashboard does not directly query Google Sheets.
+```text
+Etsy Statements
 
-All dashboard information is loaded from DuckDB.
+FedEx Billing Files
+
+Google Sheets Inventory
+
+Shipment Order-to-AWB Mapping
+```
 
 ---
 
-## Dashboard Metrics
+## 1. Etsy Statements
 
-### Total Sales
+The Etsy Statement Import module provides sales information.
 
-Total sales are calculated using imported Etsy sale transactions.
+The importer captures:
 
-```text
-Total Sales = SUM(Etsy Net Amount)
-```
+- Sale date
+- Transaction type
+- Order number
+- Net sales amount
 
-### Total Expenses
-
-Total expenses are calculated using imported FedEx billing records and inventory/material costs.
-
-```text
-Total Expenses =
-FedEx Expenses
-+
-Material or Inventory Expenses
-```
-
-### Gross Profit
+The processed records are stored in:
 
 ```text
-Gross Profit =
-Total Sales
--
-Total Expenses
+etsy_statement
 ```
 
-### Profit Margin
+Relevant fields:
 
 ```text
-Profit Margin (%) =
-(Gross Profit / Total Sales) × 100
+date
+
+type
+
+order_no
+
+net_amt
+
+created_at
 ```
 
-If total sales are zero, the profit margin must return `0` to prevent division-by-zero errors.
-
----
-
-# Etsy Statement Import
-
-The Etsy module imports sales transaction data from Etsy CSV statements.
-
-## Required Etsy Data
-
-Only the required business fields are extracted from the source CSV.
-
-| Database Field | Source |
-|---|---|
-| `date` | Etsy transaction date |
-| `type` | Etsy transaction type |
-| `order_no` | Extracted Etsy order number |
-| `net_amt` | Etsy net transaction amount |
-| `created_at` | Import timestamp |
-
-Example source row:
+Example source transaction:
 
 ```text
 June 30, 2026
+
 Sale
+
 Payment for Order #4105054431
+
 INR
+
 ₹2,810
 ```
 
@@ -297,34 +194,72 @@ Stored result:
 }
 ```
 
+---
+
 ## Etsy Processing Rules
 
-- Accept `.csv` and `.CSV` files.
-- File extension validation is case-insensitive.
+- Accept `.csv` files.
+- Accept `.CSV` files.
+- File-extension validation is case-insensitive.
 - Handle UTF-8 BOM characters.
-- Match required CSV headers case-insensitively.
-- Trim whitespace from headers and values.
+- Match CSV headers case-insensitively.
+- Trim whitespace from headers.
+- Trim whitespace from values.
 - Process only required Etsy transaction types.
-- Extract the order number from transaction descriptions.
+- Extract order numbers from transaction descriptions.
 - Remove currency symbols.
-- Remove commas from monetary values.
-- Convert monetary values into valid numeric values.
+- Remove thousands separators.
+- Convert valid monetary values into numbers.
 - Normalize dates before database insertion.
 - Validate all required values.
 - Store timestamps consistently.
-- Prevent invalid rows from being silently inserted.
-- Return useful validation errors to the API.
-- Display success and failure feedback using toast notifications.
+- Return useful validation errors.
+- Display success and error feedback using toast notifications.
 
 ---
 
-# FedEx Billing Import
+## 2. FedEx Billing
 
-The FedEx module imports invoice and shipping expense information from FedEx billing CSV files.
+The FedEx Billing Import module provides shipping, duty, tax, and transportation expense information.
 
-## Required FedEx Fields
+The importer captures:
 
-| Database Field | CSV Header |
+- Invoice type
+- Invoice date
+- Due date
+- AWB number
+- Air Waybill total amount
+- Book expense cost
+
+The processed records are stored in:
+
+```text
+fedex_billing
+```
+
+Relevant fields:
+
+```text
+invoice_type
+
+invoice_date
+
+due_date
+
+awb_number
+
+air_waybill_total_amount
+
+book_expense_cost
+
+created_at
+```
+
+---
+
+## Required FedEx CSV Fields
+
+| Database Field | FedEx CSV Header |
 |---|---|
 | `invoice_type` | Invoice Type |
 | `invoice_date` | Invoice Date |
@@ -334,94 +269,97 @@ The FedEx module imports invoice and shipping expense information from FedEx bil
 | `book_expense_cost` | Calculated by the application |
 | `created_at` | Import timestamp |
 
+---
+
 ## Book Expense Cost
 
-The application calculates the expense cost using:
+The application calculates Book Expense Cost using:
 
 ```text
 Book Expense Cost =
-Amount - ((Amount / 118) × 100)
+
+Amount
+
+-
+
+((Amount / 118) × 100)
 ```
 
 Equivalent formula:
 
 ```text
 Book Expense Cost =
+
 Amount × 18 / 118
 ```
 
 The result is rounded according to the application's financial precision rules.
 
+---
+
 ## FedEx Validation Rules
 
-- Accept `.csv` and `.CSV` files.
-- Perform case-insensitive file extension validation.
-- Validate all required CSV headers.
-- Ignore unused source columns.
-- Preserve Air Waybill numbers as text.
-- Never convert Air Waybill numbers to floating-point values.
-- Avoid scientific notation.
-- Preserve all AWB digits.
+- Accept `.csv` files.
+- Accept `.CSV` files.
+- Perform case-insensitive extension validation.
+- Validate all required FedEx headers.
+- Ignore unused CSV columns.
+- Preserve AWB numbers as text.
+- Never convert AWB numbers into floating-point values.
+- Prevent scientific notation.
+- Preserve every AWB digit.
 - Normalize supported date formats.
 - Remove currency symbols.
 - Remove thousands separators.
-- Convert valid amount values into numbers.
+- Convert valid monetary values into numbers.
 - Return row-level validation errors.
 
-## AWB Business Rule
+---
 
-Multiple shipments or records may use the same Air Waybill number.
+## AWB Business Rules
+
+An AWB is a business identifier and must always be stored as text.
+
+Do not store AWB values using:
+
+```text
+FLOAT
+
+DOUBLE
+
+REAL
+```
+
+Do not convert AWB values using:
+
+```ts
+Number(awbNumber);
+```
+
+Do not use:
+
+```ts
+parseFloat(awbNumber);
+```
+
+Multiple shipment records may use the same AWB number.
 
 Therefore:
 
 - AWB is not a unique database field.
-- Do not reject records only because the AWB already exists.
+- Do not reject a record only because its AWB already exists.
 - Do not use AWB alone as a duplicate key.
 - Do not add a unique constraint to `awb_number`.
 
 ---
 
-# Atomic Import Transactions
+## 3. Inventory Google Sheet
 
-FedEx imports use transaction-based processing.
+Inventory information is read from the `DB` tab of the configured Google Sheet.
 
-```text
-BEGIN TRANSACTION
-        │
-        ▼
-Validate and insert all rows
-        │
-        ├── All operations succeed
-        │           │
-        │           ▼
-        │         COMMIT
-        │
-        └── Any operation fails
-                    │
-                    ▼
-                 ROLLBACK
-```
+Required source columns:
 
-This prevents incomplete imports.
-
-Expected behavior:
-
-```text
-Either all valid rows are committed,
-or no rows are committed.
-```
-
-The application must not leave partially inserted billing data after a failed atomic import.
-
----
-
-# Google Sheets Inventory Synchronization
-
-Inventory information is imported from the `DB` tab of a configured Google Sheet.
-
-## Source Columns
-
-| Sheet Column | Field |
+| Google Sheet Column | Field |
 |---|---|
 | B | Order ID |
 | D | Material Type |
@@ -429,122 +367,1306 @@ Inventory information is imported from the `DB` tab of a configured Google Sheet
 | F | Color |
 | G | Quantity |
 
-## Order Number Normalization
+The scheduler reads inventory information and stores normalized order-level data in DuckDB.
 
-Google Sheets may contain item-level order IDs:
+---
 
-```text
-4098751354-1
-4098751354-2
-4098751352
-```
+## Inventory Order Normalization
 
-The suffix represents item-level information.
-
-The inventory database stores order-level information only.
-
-Normalized values:
+Google Sheets may contain item-level order numbers:
 
 ```text
-4098751354-1 → 4098751354
+4104705089-1
 
-4098751354-2 → 4098751354
+4104705089-2
 
-4098751352 → 4098751352
+4104705089-3
 ```
 
-The application always removes the item suffix after `-`.
+The suffix after `-` represents item-level information.
+
+The dashboard requires order-level information.
+
+Therefore:
+
+```text
+4104705089-1
+
+becomes
+
+4104705089
+```
+
+```text
+4104705089-2
+
+becomes
+
+4104705089
+```
+
+```text
+4104705089-3
+
+becomes
+
+4104705089
+```
+
+The database stores:
+
+```text
+4104705089
+```
+
+---
 
 ## Quantity Aggregation
 
 Example input:
 
 ```text
-4098751354-1 → 3.1
+4104705089-1 → 3.1
 
-4098751354-2 → 3.0
+4104705089-2 → 3.0
 
-4098751352 → 3.0
+4104705088 → 4.0
 ```
 
-Aggregated output:
+Aggregated result:
 
 ```json
 {
-  "4098751354": 6.1,
-  "4098751352": 3
+  "4104705089": 6.1,
+  "4104705088": 4
 }
 ```
 
-## Material Cost Rule
+The inventory database contains order-level information rather than item-level information.
+
+---
+
+## Material Cost
+
+The current material-cost rate is:
 
 ```text
 1 Quantity = ₹250
 ```
 
-Therefore:
+Formula:
 
 ```text
 Material Cost =
-Total Quantity × 250
+
+Total Quantity
+
+×
+
+₹250
 ```
 
 Example:
 
 ```text
-Total Quantity = 6.1
+Total Quantity:
 
-Material Cost =
+6.1
+```
+
+```text
+Material Cost:
+
 6.1 × ₹250
 
-Material Cost =
+=
+
 ₹1,525
 ```
 
 ---
 
-# Incremental Inventory Synchronization
+## 4. The Bridge: Order-to-AWB Mapping
 
-The scheduler does not read and process the entire Google Sheet during every execution.
-
-It stores synchronization progress in DuckDB.
-
-Example metadata:
+Etsy contains:
 
 ```text
-sync_name:
-inventory_google_sheet
-
-last_processed_row:
-1250
-
-last_sync_at:
-2026-07-12 12:00:00
+Order Number
 ```
 
-On the next synchronization:
+FedEx contains:
 
 ```text
-Read:
-
-last_processed_row + 1
-
-through:
-
-current sheet last row
+AWB Number
 ```
 
-Only newly appended source rows are processed.
+The application requires a relationship between the two identifiers.
 
-This improves performance and prevents repeated full-sheet processing.
+The Order-to-AWB mapping layer acts as the bridge:
+
+```text
+Etsy Order
+
+↓
+
+Order-to-AWB Mapping
+
+↓
+
+FedEx AWB
+
+↓
+
+FedEx Billing Cost
+```
+
+The current development implementation may use dummy shipment APIs and local mapping information.
+
+The mapping layer is isolated so it can later be connected to a production shipment service without rewriting dashboard components.
 
 ---
 
-# Background Scheduler
+## Shipment API
 
-The inventory scheduler runs independently from Next.js.
+Example endpoint:
 
-## Development Processes
+```http
+GET /api/shipments/orders/4074621797
+```
+
+Example response:
+
+```json
+{
+  "data": {
+    "orderNo": "4074621797",
+    "awbNumbers": [
+      "873549431322"
+    ],
+    "shipments": [
+      {
+        "awbNumber": "873549431322",
+        "processCode": "P_7104",
+        "shippingStatus": "SHIPPED",
+        "customerName": "Gretchen Dziadosz",
+        "shippedAt": "2026-06-25T17:34:33.147Z",
+        "orders": [
+          "4074621797"
+        ]
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Supported Mapping Relationships
+
+The mapping system supports:
+
+```text
+One Order
+
+→
+
+One AWB
+```
+
+```text
+One Order
+
+→
+
+Multiple AWBs
+```
+
+```text
+One AWB
+
+→
+
+Multiple Orders
+```
+
+The application must correctly handle all three relationships.
+
+---
+
+# Phase 2: Accounting Engine
+
+Dashboard calculations are performed on the Next.js backend.
+
+Primary query logic:
+
+```text
+lib/dashboard/dashboardQueries.ts
+```
+
+The backend reconciles:
+
+```text
+Etsy Sales
+
++
+
+Inventory Usage
+
++
+
+Order-to-AWB Mapping
+
++
+
+FedEx Billing
+```
+
+The frontend receives processed financial results rather than calculating accounting values from raw records.
+
+---
+
+## Material Cost Reconciliation
+
+The accounting engine matches Etsy orders with normalized inventory orders.
+
+The current logic may use a `LIKE` condition to support item-level inventory IDs.
+
+Example:
+
+```text
+Etsy Order:
+
+4104705089
+```
+
+Possible inventory source values:
+
+```text
+4104705089
+
+4104705089-1
+
+4104705089-2
+```
+
+All matching quantities are aggregated.
+
+Formula:
+
+```text
+Order Material Cost =
+
+Total Matching Quantity
+
+×
+
+₹250
+```
+
+Order matching must not accidentally match unrelated order numbers.
+
+---
+
+# Fractional FedEx Cost Allocation
+
+FedEx billing costs belong to AWB numbers.
+
+Sales belong to Etsy order numbers.
+
+The mapping bridge connects the two.
+
+The application must prevent FedEx costs from being counted multiple times.
+
+---
+
+## Case 1: One Order Has One AWB
+
+Example:
+
+```text
+Order:
+
+4104705089
+```
+
+```text
+AWB:
+
+873549431322
+```
+
+```text
+AWB Cost:
+
+₹500
+```
+
+The order receives:
+
+```text
+₹500
+```
+
+---
+
+## Case 2: One AWB Contains Multiple Orders
+
+Example:
+
+```text
+AWB:
+
+873549431322
+```
+
+Mapped orders:
+
+```text
+4104705089
+
+4104705090
+
+4104705091
+```
+
+Total AWB cost:
+
+```text
+₹600
+```
+
+Number of distinct orders:
+
+```text
+3
+```
+
+Allocated cost:
+
+```text
+₹600 / 3
+
+=
+
+₹200 per order
+```
+
+Formula:
+
+```text
+Allocated AWB Cost Per Order =
+
+Total AWB Cost
+
+÷
+
+Number of Distinct Orders Mapped to the AWB
+```
+
+This prevents the same ₹600 expense from being counted against all three orders.
+
+---
+
+## Case 3: One Order Is Split Across Multiple AWBs
+
+Example:
+
+```text
+Order:
+
+4104705089
+```
+
+Connected AWBs:
+
+```text
+AWB 1
+
+AWB 2
+```
+
+Allocated cost from AWB 1:
+
+```text
+₹200
+```
+
+Allocated cost from AWB 2:
+
+```text
+₹300
+```
+
+Total order FedEx cost:
+
+```text
+₹200 + ₹300
+
+=
+
+₹500
+```
+
+Do not divide the final cost by the number of AWBs.
+
+---
+
+## Complete Allocation Formula
+
+```text
+Order FedEx Cost =
+
+SUM(
+
+AWB Cost
+
+÷
+
+COUNT(DISTINCT Orders Mapped to the AWB)
+
+)
+```
+
+The allocation is calculated independently for every AWB.
+
+---
+
+# Direct NPF Calculation
+
+The application calculates Direct NPF for every order.
+
+NPF means:
+
+```text
+Net Profit
+```
+
+Current formula:
+
+```text
+Direct NPF =
+
+Gross Sales
+
+-
+
+Material Cost
+
+-
+
+Allocated Duty / FedEx Cost
+```
+
+If Duty and Transport are stored separately:
+
+```text
+Direct NPF =
+
+Gross Sales
+
+-
+
+Material Cost
+
+-
+
+Allocated Duty Cost
+
+-
+
+Allocated Transport Cost
+```
+
+---
+
+## Example
+
+```text
+Gross Sales:
+
+₹10,000
+```
+
+```text
+Material Cost:
+
+₹2,500
+```
+
+```text
+Allocated Duty Cost:
+
+₹500
+```
+
+```text
+Allocated Transport Cost:
+
+₹1,000
+```
+
+Calculation:
+
+```text
+Direct NPF =
+
+₹10,000
+
+-
+
+₹2,500
+
+-
+
+₹500
+
+-
+
+₹1,000
+```
+
+Result:
+
+```text
+Direct NPF = ₹6,000
+```
+
+---
+
+## Profit Margin
+
+Formula:
+
+```text
+Profit Margin (%) =
+
+(Direct NPF / Gross Sales)
+
+×
+
+100
+```
+
+Example:
+
+```text
+Direct NPF:
+
+₹6,000
+```
+
+```text
+Gross Sales:
+
+₹10,000
+```
+
+```text
+Profit Margin:
+
+60%
+```
+
+If Gross Sales is zero:
+
+```text
+Profit Margin = 0
+```
+
+The application must never return:
+
+```text
+NaN
+
+Infinity
+
+-Infinity
+```
+
+---
+
+# Phase 3: Dashboard Interface
+
+The processed accounting information is returned to the React frontend.
+
+The dashboard provides business-level financial analytics for the active date range.
+
+---
+
+## Dashboard Metrics
+
+The dashboard displays:
+
+- Total Sales
+- Total Expenses
+- Gross Profit / Direct NPF
+- Profit Margin
+
+---
+
+## Total Sales
+
+```text
+Total Sales =
+
+SUM(Etsy Net Sales)
+```
+
+---
+
+## Total Material Cost
+
+```text
+Total Material Cost =
+
+SUM(Order Material Costs)
+```
+
+---
+
+## Total FedEx Cost
+
+```text
+Total FedEx Cost =
+
+Total Allocated Duty Cost
+
++
+
+Total Allocated Transportation Cost
+```
+
+---
+
+## Total Expenses
+
+```text
+Total Expenses =
+
+Total Material Cost
+
++
+
+Total FedEx Cost
+```
+
+Equivalent formula:
+
+```text
+Total Expenses =
+
+Material Cost
+
++
+
+Duty Cost
+
++
+
+Transportation Cost
+```
+
+---
+
+## Gross Profit / Direct NPF
+
+```text
+Gross Profit =
+
+Total Sales
+
+-
+
+Total Expenses
+```
+
+---
+
+## Profit Margin
+
+```text
+Profit Margin =
+
+(Gross Profit / Total Sales)
+
+×
+
+100
+```
+
+---
+
+# Dashboard Visualizations
+
+## Business Activity Graph
+
+The activity graph displays financial performance over time.
+
+The graph can display:
+
+- Sales
+- Expenses
+- Net Profit
+
+The default dashboard period can be configured in:
+
+```text
+config.json
+```
+
+Default:
+
+```text
+Last 12 months
+```
+
+---
+
+## Chart Hover Information
+
+When the user hovers over a chart period, display:
+
+```text
+Total Sales
+
+Material Cost
+
+Duty Cost
+
+Transportation Cost
+
+Total FedEx Cost
+
+Total Expenses
+
+Net Profit
+
+Profit Margin
+```
+
+Missing numeric values must display as:
+
+```text
+₹0.00
+```
+
+The chart must never display:
+
+```text
+undefined
+
+null
+
+NaN
+
+Infinity
+```
+
+---
+
+## Expense Breakdown
+
+The expense pie or donut chart displays:
+
+```text
+Material Cost
+
+FedEx Duty Cost
+
+Transportation Cost
+```
+
+If Duty and Transportation are not stored separately, display the available FedEx expense category without inventing values.
+
+The center value displays:
+
+```text
+Total Expenses
+```
+
+---
+
+# Dynamic Date Filtering
+
+The dashboard supports preset date filters.
+
+Examples:
+
+```text
+7D
+
+30D
+
+3M
+
+6M
+
+12M
+
+FY
+
+Custom
+```
+
+When the user changes the selected period:
+
+1. The frontend calculates the exact date range.
+
+2. Dates are converted to:
+
+```text
+YYYY-MM-DD
+```
+
+3. URL query parameters are updated.
+
+4. The page does not perform a complete browser reload.
+
+5. The frontend requests updated dashboard data.
+
+6. The backend runs new DuckDB queries.
+
+7. KPI cards update.
+
+8. Charts update.
+
+9. Expense calculations update.
+
+10. Profit calculations update.
+
+---
+
+# Phase 4: Search and Order Investigation
+
+The dashboard provides a search system for investigating individual orders and shipments.
+
+---
+
+## Live Search
+
+Typing in the search field triggers a debounced API request.
+
+Endpoint:
+
+```http
+GET /api/dashboard/search?q={query}
+```
+
+Example:
+
+```http
+GET /api/dashboard/search?q=410470
+```
+
+The debounce prevents unnecessary requests for every keystroke.
+
+---
+
+## Dual Search
+
+DuckDB searches across:
+
+```text
+Etsy Order Number
+
+FedEx AWB Number
+```
+
+The user can search using either identifier.
+
+---
+
+## Search by Order Number
+
+Example:
+
+```text
+4104705089
+```
+
+Possible result:
+
+```text
+Order:
+
+4104705089
+
+
+AWBs:
+
+873549431322
+
+
+Sales:
+
+₹10,000
+
+
+Status:
+
+Profitable
+```
+
+---
+
+## Search by AWB Number
+
+Example:
+
+```text
+873549431322
+```
+
+Possible result:
+
+```text
+AWB:
+
+873549431322
+
+
+Orders:
+
+4104705089
+
+
+Sales:
+
+₹10,000
+
+
+Status:
+
+Profitable
+```
+
+---
+
+## Autocomplete Dropdown
+
+Search results are displayed below the search input.
+
+Results may contain:
+
+- Order number
+- Connected AWB numbers
+- Sales amount
+- Profitability status
+
+The dropdown supports:
+
+- Debounced searching
+- Partial matching
+- Loading state
+- No-results state
+- Keyboard navigation
+- Arrow Up
+- Arrow Down
+- Enter
+- Escape
+- Click-outside closing
+
+---
+
+# Order Details Modal
+
+Selecting a search result opens a centered order-details modal.
+
+The modal displays:
+
+```text
+Order Number
+
+Connected AWB Numbers
+
+Gross Sales
+
+Material Cost
+
+Duty Cost
+
+Transportation Cost
+
+Book Expenses
+
+Total Expenses
+
+Direct NPF
+
+Profit Margin
+
+Shipment Information
+```
+
+Shipment information may include:
+
+```text
+Customer Name
+
+Shipping Status
+
+Shipment Date
+
+Process Code
+```
+
+Missing values must display safely.
+
+Do not display:
+
+```text
+undefined
+
+null
+
+NaN
+
+Invalid Date
+```
+
+---
+
+# Phase 5: Financial Report Export
+
+The dashboard generates financial CSV reports for the active date range.
+
+---
+
+## Export Workflow
+
+```text
+User clicks Export Report
+             │
+             ▼
+Read active dates from URL
+             │
+             ▼
+Request all matching orders
+             │
+             ▼
+Run backend reconciliation
+             │
+             ▼
+Transform records into CSV
+             │
+             ▼
+Preserve AWB values as text
+             │
+             ▼
+Download financial report
+```
+
+---
+
+## Date Retrieval
+
+The export process uses the active date range stored in the URL.
+
+Example:
+
+```text
+from=2026-06-01
+
+to=2026-06-30
+```
+
+The exported report always matches the currently selected dashboard period.
+
+---
+
+## Mass Data Query
+
+The backend retrieves every matching order within the selected period.
+
+Maximum supported export:
+
+```text
+100,000 records
+```
+
+Financial calculations are performed on the backend.
+
+The browser does not calculate report values from raw records.
+
+---
+
+## CSV Report Columns
+
+The financial report contains:
+
+```text
+Order Number
+
+AWB Numbers
+
+Date
+
+Sales
+
+Material Cost
+
+Duty Cost
+
+Book Expenses
+
+Net Profit
+```
+
+The exact labels must match the current implementation.
+
+---
+
+## Excel-Safe AWB Formatting
+
+AWB numbers must remain text when the CSV is opened in Excel.
+
+Export format:
+
+```text
+="873549431322"
+```
+
+This prevents Excel from displaying:
+
+```text
+8.73549E+11
+```
+
+AWB numbers must never lose digits.
+
+---
+
+## Multiple AWBs
+
+If one order contains multiple AWB numbers, they must remain inside the same CSV column.
+
+Values containing commas must be escaped using valid CSV formatting.
+
+Example:
+
+```csv
+"=""873549431322"", ""873549431323"""
+```
+
+The CSV structure must remain aligned.
+
+---
+
+## Download File Name
+
+Generated reports use:
+
+```text
+Amazia_ERP_Report_YYYY-MM-DD_to_YYYY-MM-DD.csv
+```
+
+Example:
+
+```text
+Amazia_ERP_Report_2026-06-01_to_2026-06-30.csv
+```
+
+---
+
+# Dashboard Data Integrity Rules
+
+1. Dashboard financial calculations run on the backend.
+
+2. The dashboard reads curated information from DuckDB.
+
+3. Google Sheets are not queried during dashboard loading.
+
+4. Order numbers are stored and compared as text.
+
+5. AWB numbers are stored and compared as text.
+
+6. Inventory item suffixes are removed before reconciliation.
+
+7. Inventory quantities are aggregated by normalized order number.
+
+8. Material cost is calculated using the configured material rate.
+
+9. Shared AWB costs are divided by the number of distinct mapped orders.
+
+10. Costs from multiple AWBs connected to one order are added together.
+
+11. Do not divide an order's total FedEx cost merely because it has multiple AWBs.
+
+12. FedEx costs must not be duplicated through many-to-many database joins.
+
+13. KPI cards use backend-calculated values.
+
+14. Charts use the same financial formulas as KPI cards.
+
+15. Search details use the same financial formulas as the dashboard.
+
+16. CSV reports use the same financial formulas as the dashboard.
+
+17. Date filters are applied consistently.
+
+18. Missing numeric values default safely to zero.
+
+19. Financial APIs must never return `NaN`.
+
+20. Financial APIs must never return infinite values.
+
+21. Exported AWB numbers must remain complete text identifiers.
+
+---
+
+# Google Sheets Incremental Synchronization
+
+The scheduler does not process the complete Google Sheet during every execution.
+
+Synchronization progress is stored in:
+
+```text
+sync_metadata
+```
+
+Example:
+
+```text
+sync_name:
+
+inventory_google_sheet
+```
+
+```text
+last_processed_row:
+
+1250
+```
+
+```text
+last_sync_at:
+
+2026-07-15 12:00:00
+```
+
+During the next synchronization:
+
+```text
+Start Row:
+
+last_processed_row + 1
+```
+
+```text
+End Row:
+
+Current Google Sheet Last Row
+```
+
+Only newly appended rows are processed.
+
+---
+
+# Background Inventory Scheduler
+
+The scheduler runs independently from Next.js.
+
+Development setup:
 
 Terminal 1:
 
@@ -558,7 +1680,9 @@ Terminal 2:
 npm run scheduler
 ```
 
-## Schedule
+---
+
+## Scheduler Frequency
 
 The scheduler runs every six hours.
 
@@ -586,79 +1710,78 @@ Expected execution times:
 6:00 PM IST
 ```
 
-## Why the Scheduler Is Separate
-
-The scheduler is not registered inside the Next.js application because an internal scheduler may be affected by:
-
-- Development hot reload
-- Application recompilation
-- Node.js event-loop blocking
-- Application restarts
-- Multiple application instances
-- Serverless process shutdowns
-- Duplicate cron registration
-
-The separate worker improves reliability and keeps background synchronization independent from dashboard traffic.
-
 ---
 
-# Scheduler Safety
-
-The scheduler prevents overlapping executions.
-
-Example:
-
-```ts
-let isSyncRunning = false;
-```
-
-If a previous synchronization is still active:
-
-```text
-Previous synchronization is still running.
-
-Current scheduled execution is skipped.
-```
-
-The lock is reset after success or failure.
+## Scheduler Responsibilities
 
 The scheduler:
 
-- Initializes DuckDB when the worker starts.
-- Registers only one scheduled task.
-- Uses the `Asia/Kolkata` timezone.
-- Logs synchronization start time.
-- Logs synchronization completion.
-- Logs processing duration.
-- Handles errors without terminating the worker.
-- Supports graceful shutdown.
-- Preserves synchronization metadata.
+- Initializes DuckDB.
+- Connects to Google Sheets.
+- Reads `last_processed_row`.
+- Finds newly appended rows.
+- Reads only new rows.
+- Validates source information.
+- Normalizes order numbers.
+- Aggregates quantities.
+- Saves records to DuckDB.
+- Updates synchronization metadata.
+- Logs synchronization duration.
+- Handles failures without terminating.
+- Prevents overlapping synchronization runs.
 
 ---
 
 # Database
 
-DuckDB is used as the local analytical and application database.
+DuckDB is the application's embedded analytical database.
 
-The database is stored as a local database file.
-
-Example:
+Database file:
 
 ```text
 database/AmaziaERP.db
 ```
 
-Use the actual configured path in the project if it differs.
+Use the actual configured database path if it differs.
 
-DuckDB stores data inside the database file. It is not necessary to maintain a separate CSV copy after a successful import unless an export or backup feature is explicitly implemented.
+The application stores curated information inside the DuckDB database file.
+
+A separate local CSV copy is not required after a successful import unless an export or backup feature explicitly creates one.
 
 ---
 
-## Main Database Tables
+# Main Database Tables
 
-### `fedex_billing`
+## `etsy_statement`
+
+Stores curated Etsy sales information.
+
+Example structure:
+
+```sql
+CREATE TABLE IF NOT EXISTS etsy_statement (
+    id BIGINT PRIMARY KEY,
+    date DATE,
+    type TEXT,
+    order_no TEXT,
+    net_amt DOUBLE,
+    created_at TIMESTAMP
+);
+```
+
+Important:
+
+```text
+order_no must be stored as TEXT
+```
+
+---
+
+## `fedex_billing`
 
 Stores normalized FedEx billing records.
+
+Example structure:
 
 ```sql
 CREATE TABLE IF NOT EXISTS fedex_billing (
@@ -676,47 +1799,12 @@ CREATE TABLE IF NOT EXISTS fedex_billing (
 Important:
 
 ```text
-awb_number must be stored as TEXT.
-```
-
-Do not store AWB numbers using:
-
-```text
-FLOAT
-
-DOUBLE
-
-REAL
-```
-
-Numeric storage may display values using scientific notation and can affect identifier precision.
-
----
-
-### `etsy_statement`
-
-Stores curated Etsy sales transactions.
-
-```sql
-CREATE TABLE IF NOT EXISTS etsy_statement (
-    id BIGINT PRIMARY KEY,
-    date DATE,
-    type TEXT,
-    order_no TEXT,
-    net_amt DOUBLE,
-    created_at TIMESTAMP
-);
-```
-
-Important:
-
-```text
-order_no must be stored as TEXT.
+awb_number must be stored as TEXT
 ```
 
 ---
 
-### `inventory_table`
+## `inventory_table`
 
 Stores normalized order-level inventory information.
 
@@ -737,7 +1825,48 @@ CREATE TABLE IF NOT EXISTS inventory_table (
 
 ---
 
-### `sync_metadata`
+## `shipment_order_mapping`
+
+Stores relationships between Etsy order numbers and FedEx AWB numbers.
+
+Example structure:
+
+```sql
+CREATE TABLE IF NOT EXISTS shipment_order_mapping (
+    id BIGINT PRIMARY KEY,
+    order_no TEXT,
+    awb_number TEXT,
+    process_code TEXT,
+    shipping_status TEXT,
+    customer_name TEXT,
+    shipped_at TIMESTAMP,
+    created_at TIMESTAMP
+);
+```
+
+Important:
+
+```text
+One order may have multiple AWBs.
+
+One AWB may have multiple orders.
+```
+
+Do not add a unique constraint to only:
+
+```text
+order_no
+```
+
+Do not add a unique constraint to only:
+
+```text
+awb_number
+```
+
+---
+
+## `sync_metadata`
 
 Stores incremental synchronization progress.
 
@@ -751,11 +1880,11 @@ CREATE TABLE IF NOT EXISTS sync_metadata (
 
 ---
 
-### `import_history`
+## `import_history`
 
-Stores file-import audit information.
+Stores import audit information.
 
-Typical fields:
+Example structure:
 
 ```sql
 CREATE TABLE IF NOT EXISTS import_history (
@@ -774,7 +1903,115 @@ CREATE TABLE IF NOT EXISTS import_history (
 );
 ```
 
-The exact schema must match the implementation in the project.
+The actual database schema in the project is the source of truth.
+
+---
+
+# API Overview
+
+## FedEx Import
+
+```http
+POST /api/import/fedex
+```
+
+Request:
+
+```text
+multipart/form-data
+```
+
+Example response:
+
+```json
+{
+  "success": true,
+  "totalRows": 1282,
+  "importedRows": 1282,
+  "failedRows": 0,
+  "processingTimeMs": 2753,
+  "processingTime": "2.75 sec",
+  "errors": []
+}
+```
+
+---
+
+## Etsy Import
+
+```http
+POST /api/import/etsy
+```
+
+Example response:
+
+```json
+{
+  "success": true,
+  "totalRows": 40,
+  "saleRows": 5,
+  "importedRows": 5,
+  "failedRows": 0,
+  "processingTime": "0.02 sec",
+  "errors": []
+}
+```
+
+---
+
+## Dashboard Summary
+
+```http
+GET /api/dashboard/summary
+```
+
+Example:
+
+```http
+GET /api/dashboard/summary?from=2025-07-15&to=2026-07-15
+```
+
+The endpoint returns financial metrics and chart information for the selected period.
+
+---
+
+## Dashboard Search
+
+```http
+GET /api/dashboard/search
+```
+
+Example:
+
+```http
+GET /api/dashboard/search?q=4104705089
+```
+
+The endpoint searches order numbers and AWB numbers.
+
+---
+
+## Shipment by Order
+
+```http
+GET /api/shipments/orders/{orderNo}
+```
+
+Example:
+
+```http
+GET /api/shipments/orders/4074621797
+```
+
+The endpoint returns connected AWB and shipment information.
+
+---
+
+## Financial Report Export
+
+The export endpoint returns reconciled order-level information as a CSV file.
+
+The exported report uses the active dashboard date range.
 
 ---
 
@@ -786,9 +2023,17 @@ AMAZIA_ERP/
 ├── app/
 │   ├── api/
 │   │   ├── dashboard/
+│   │   │   ├── summary/
+│   │   │   ├── search/
+│   │   │   └── export/
+│   │   │
+│   │   ├── shipments/
+│   │   │   └── orders/
+│   │   │
 │   │   ├── import/
 │   │   │   ├── etsy/
 │   │   │   └── fedex/
+│   │   │
 │   │   └── inventory/
 │   │
 │   ├── dashboard/
@@ -807,6 +2052,9 @@ AMAZIA_ERP/
 │   └── AmaziaERP.db
 │
 ├── lib/
+│   ├── dashboard/
+│   │   └── dashboardQueries.ts
+│   │
 │   ├── csv.ts
 │   ├── duckdb.ts
 │   ├── processor.ts
@@ -815,7 +2063,8 @@ AMAZIA_ERP/
 ├── services/
 │   ├── etsyImportService.ts
 │   ├── fedexImportService.ts
-│   └── inventorySync.ts
+│   ├── inventorySync.ts
+│   └── shipmentService.ts
 │
 ├── workers/
 │   └── inventoryScheduler.ts
@@ -841,7 +2090,9 @@ AMAZIA_ERP/
 └── README.md
 ```
 
-The actual folder and file names in the repository are the source of truth. Update this section if the implementation uses different paths.
+The actual project structure is the source of truth.
+
+Update this section if the implemented paths are different.
 
 ---
 
@@ -867,45 +2118,23 @@ GOOGLE_PRIVATE_KEY="your_private_key"
 RUN_INVENTORY_SYNC_ON_STARTUP=false
 ```
 
-Do not commit credentials.
+Never commit credentials.
 
 Add environment files to `.gitignore`:
 
 ```gitignore
 .env
+
 .env.local
+
 .env.production
 ```
 
 ---
 
-# Dashboard Configuration
-
-The dashboard displays a configurable number of months.
-
-Example:
-
-```json
-{
-  "dashboard": {
-    "defaultMonths": 12
-  }
-}
-```
-
-Default:
-
-```text
-12 months
-```
-
-The dashboard must read the value from configuration rather than hardcoding it throughout the UI.
-
----
-
 # Installation
 
-## Prerequisites
+## Requirements
 
 Install:
 
@@ -925,19 +2154,23 @@ Verify:
 node --version
 ```
 
+Verify npm:
+
 ```bash
 npm --version
 ```
 
 ---
 
-## Clone the Project
+## Install the Project
+
+Clone:
 
 ```bash
 git clone <repository-url>
 ```
 
-Move into the project:
+Open the project:
 
 ```bash
 cd amazia_erp
@@ -975,19 +2208,7 @@ Open another terminal:
 npm run scheduler
 ```
 
-Expected output:
-
-```text
-[Inventory Scheduler] Worker started.
-
-[Inventory Scheduler] Timezone: Asia/Kolkata
-
-[Inventory Scheduler] Schedule: Every 6 hours.
-
-[Inventory Scheduler] Next automatic synchronization is registered.
-```
-
-Keep both processes running.
+Keep both terminals running.
 
 Terminal 1:
 
@@ -1003,15 +2224,15 @@ npm run scheduler
 
 ---
 
-# Production Build
+# Production
 
-Create a production build:
+Create the production build:
 
 ```bash
 npm run build
 ```
 
-Start the production web application:
+Start Next.js:
 
 ```bash
 npm run start
@@ -1023,7 +2244,7 @@ Start the scheduler separately:
 npm run scheduler
 ```
 
-The web application and scheduler must remain separate processes.
+The Next.js application and inventory scheduler must run as separate processes.
 
 ---
 
@@ -1031,81 +2252,13 @@ The web application and scheduler must remain separate processes.
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Start Next.js development server |
-| `npm run build` | Create production build |
-| `npm run start` | Start production Next.js server |
-| `npm run scheduler` | Start inventory synchronization worker |
-| `npm run lint` | Run lint checks |
+| `npm run dev` | Start the Next.js development server |
+| `npm run build` | Create a production build |
+| `npm run start` | Start the production Next.js server |
+| `npm run scheduler` | Start the inventory synchronization worker |
+| `npm run lint` | Run project lint checks |
 
-The available scripts must match the current `package.json`.
-
----
-
-# API Overview
-
-## FedEx Import
-
-```http
-POST /api/import/fedex
-```
-
-Request:
-
-```text
-multipart/form-data
-```
-
-Expected successful response:
-
-```json
-{
-  "success": true,
-  "totalRows": 1282,
-  "importedRows": 1282,
-  "failedRows": 0,
-  "processingTimeMs": 2753,
-  "processingTime": "2.75 sec",
-  "errors": []
-}
-```
-
----
-
-## Etsy Import
-
-```http
-POST /api/import/etsy
-```
-
-Example successful response:
-
-```json
-{
-  "success": true,
-  "totalRows": 40,
-  "saleRows": 5,
-  "importedRows": 5,
-  "failedRows": 0,
-  "processingTime": "0.02 sec",
-  "errors": []
-}
-```
-
----
-
-## Dashboard Summary
-
-```http
-GET /api/dashboard/summary
-```
-
-Example:
-
-```http
-GET /api/dashboard/summary?from=2025-07-12&to=2026-07-12
-```
-
-The endpoint returns dashboard metrics for the selected date range.
+The actual `package.json` is the source of truth.
 
 ---
 
@@ -1113,21 +2266,28 @@ The endpoint returns dashboard metrics for the selected date range.
 
 Amazia ERP uses a warm, minimal business interface.
 
-## Theme
-
 ```css
 @theme {
   --color-brand-background: #F4EFE5;
+
   --color-brand-card: #FFFAF1;
+
   --color-brand-primary: #184B4D;
+
   --color-brand-primary-hover: #103638;
+
   --color-brand-border: #E4D4BA;
+
   --color-brand-muted: #677072;
+
   --color-brand-success: #E6F4EA;
+
   --color-brand-danger: #FDE9E8;
+
   --color-brand-gold: #F1E1B9;
 
   --radius-xl: 20px;
+
   --radius-2xl: 24px;
 
   --shadow-glass:
@@ -1136,7 +2296,9 @@ Amazia ERP uses a warm, minimal business interface.
 }
 ```
 
-## UI Principles
+---
+
+# UI Principles
 
 - Minimal design
 - Warm neutral background
@@ -1148,15 +2310,16 @@ Amazia ERP uses a warm, minimal business interface.
 - Rounded cards
 - Soft shadows
 - Accessible contrast
-- Toast notifications for import feedback
-- Pagination instead of very long tables
-- No unnecessary dashboard scrolling for large datasets
+- Toast notifications
+- Paginated large datasets
+- Responsive charts
+- Clear financial breakdowns
 
 ---
 
 # Error Handling
 
-The application returns structured error responses.
+The application returns structured errors.
 
 Example:
 
@@ -1174,52 +2337,18 @@ Example:
 }
 ```
 
-The UI displays user-friendly toast notifications.
+The frontend displays user-friendly toast notifications.
 
-Technical errors remain in server logs.
+Technical information remains in server logs.
 
 Do not expose:
 
-- Database file paths
+- Database paths
 - SQL internals
 - Stack traces
 - Environment variables
-- Credentials
-- Internal implementation details
-
----
-
-# Data Integrity Rules
-
-1. Store identifiers as text.
-
-2. Do not store AWB numbers as floating-point values.
-
-3. Do not use AWB as a unique key.
-
-4. Preserve complete AWB values.
-
-5. Normalize item-level inventory order numbers to order-level values.
-
-6. Aggregate quantities for matching normalized order numbers.
-
-7. Use database transactions for atomic imports.
-
-8. Roll back failed atomic imports.
-
-9. Do not leave partial data after a failed atomic import.
-
-10. Preserve `sync_metadata.last_processed_row`.
-
-11. Process only newly appended Google Sheet rows.
-
-12. Do not query Google Sheets while loading the dashboard.
-
-13. Run only one inventory scheduler instance.
-
-14. Keep scheduler database operations short and transactional.
-
-15. Never delete the database automatically after an error.
+- Google credentials
+- Internal implementation information
 
 ---
 
@@ -1227,20 +2356,25 @@ Do not expose:
 
 DuckDB is an embedded database.
 
-Avoid opening the same database file from multiple write processes unnecessarily.
+Avoid unnecessary simultaneous write access.
 
-When inspecting the database using DBeaver:
+When opening the database using DBeaver:
 
 1. Stop the Next.js application if required.
+
 2. Stop the inventory scheduler.
-3. Open the DuckDB database in DBeaver.
-4. Run read or maintenance queries.
+
+3. Open DuckDB using DBeaver.
+
+4. Run database queries.
+
 5. Close the DBeaver connection.
-6. Restart the application and scheduler.
 
-This reduces file-lock conflicts.
+6. Restart Next.js.
 
-Do not delete the database file to resolve normal import errors.
+7. Restart the scheduler.
+
+Do not delete the database to resolve normal application errors.
 
 ---
 
@@ -1250,10 +2384,10 @@ Do not delete the database file to resolve normal import errors.
 
 Possible causes:
 
-- Another application holds a database lock.
-- DBeaver is connected while the application is writing.
-- The scheduler and application are attempting conflicting writes.
-- The application was terminated during a transaction.
+- DBeaver holds a database lock.
+- Another application holds the database file.
+- Next.js and the scheduler are performing conflicting writes.
+- The application stopped during a transaction.
 - The configured database path is incorrect.
 
 Recommended steps:
@@ -1272,31 +2406,6 @@ Recommended steps:
 6. Restart the scheduler.
 ```
 
-Do not immediately delete the database.
-
----
-
-## CSV Extension Error
-
-File validation must be case-insensitive.
-
-Correct:
-
-```ts
-const isCSV =
-  file.name.toLowerCase().endsWith(".csv");
-```
-
-This accepts:
-
-```text
-invoice.csv
-
-invoice.CSV
-
-Invoice.Csv
-```
-
 ---
 
 ## AWB Displayed in Scientific Notation
@@ -1304,40 +2413,46 @@ Invoice.Csv
 Cause:
 
 ```text
-AWB was interpreted as a numeric value.
+The AWB was interpreted as a number.
 ```
 
-Fix:
+Correct behavior:
 
 ```text
-Store and process AWB as TEXT.
+Store AWB as TEXT.
 ```
 
-Do not convert AWB using:
+Do not use:
 
 ```ts
-Number(awb)
+Number(awb);
 ```
 
-or:
+Do not use:
 
 ```ts
-parseFloat(awb)
+parseFloat(awb);
+```
+
+For CSV export:
+
+```text
+="873549431322"
 ```
 
 ---
 
-## Scheduler Missed Execution Warning
+## Scheduler Missed Execution
 
-If the scheduler runs inside Next.js, application compilation or blocking work can delay cron execution.
+The scheduler must run separately from Next.js.
 
-The production-safe solution is to run:
+Start it using:
 
 ```bash
 npm run scheduler
 ```
 
-as a separate process.
+Do not register the production scheduler inside Next.js instrumentation.
 
 ---
 
@@ -1345,83 +2460,53 @@ as a separate process.
 
 ## Completed
 
-- Next.js application setup
+- Next.js application
+- TypeScript configuration
 - Tailwind UI theme
 - DuckDB integration
+- Etsy CSV upload
+- Etsy CSV parsing
+- Etsy Sale extraction
+- Etsy order-number extraction
+- Etsy amount normalization
 - FedEx CSV upload
 - FedEx CSV parsing
 - FedEx header mapping
 - FedEx date normalization
 - FedEx amount normalization
+- AWB text preservation
 - Book Expense Cost calculation
-- Transaction-based FedEx imports
-- Etsy statement upload
-- Etsy Sale extraction
-- Etsy order-number extraction
-- Etsy amount normalization
+- Transaction-based FedEx import
 - Google Sheets inventory integration
 - Incremental inventory synchronization
 - Inventory order-number normalization
 - Quantity aggregation
 - Material-cost calculation
 - Six-hour scheduler
-- Dedicated scheduler worker architecture
+- Dedicated scheduler process
+- Order-to-AWB mapping
+- Dummy shipment API
+- Fractional FedEx expense allocation
+- Accounting reconciliation engine
+- Direct NPF calculation
 - Business dashboard
 - Sales metrics
 - Expense metrics
-- Gross-profit metrics
+- Profit metrics
 - Profit-margin metrics
-- Monthly performance chart
+- Business activity graph
 - Expense breakdown
-- Search
-- Date filtering
-- Report export
-- Paginated records
-
-## Future Improvements
-
-- Authentication and role-based access
-- User management
-- Advanced report builder
-- PDF report generation
-- Excel report export
-- Import-history page
-- Manual inventory synchronization
-- Scheduler health monitoring
-- Database backup automation
-- Audit logs
-- Notification system
-- Deployment monitoring
-- Automated integration tests
-- Dashboard caching
-- Advanced financial forecasting
+- URL-based date filtering
+- Order-number search
+- AWB-number search
+- Debounced search
+- Autocomplete dropdown
+- Order details modal
+- Financial CSV export
+- Excel-safe AWB formatting
 
 ---
-
-# Security
-
-- Never commit `.env.local`.
-- Never expose Google credentials to the browser.
-- Keep Google Sheets access on the server.
-- Validate all uploaded files.
-- Validate all parsed values.
-- Use parameterized database queries.
-- Do not expose raw database errors to users.
-- Keep technical logs server-side.
-- Do not trust CSV content without validation.
-
----
-
-# License
-
-This project is private and intended for Amazia ERP business operations.
-
-Unauthorized copying, redistribution, or commercial use is not permitted unless approved by the project owner.
-
----
-
-# Project
 
 **Amazia ERP**
 
-Billing, inventory, expense management, sales analytics, and business reporting in one application.
+Sales ingestion, billing management, inventory synchronization, expense reconciliation, order-level profitability, business analytics, search, and financial reporting in one application.
