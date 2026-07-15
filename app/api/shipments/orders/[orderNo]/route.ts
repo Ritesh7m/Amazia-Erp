@@ -1,26 +1,32 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import { DUMMY_SHIPMENTS, ORDER_TO_AWBS_MAP, AWB_TO_ORDERS_MAP } from '@/lib/dummyShipmentData';
 
 export async function GET(
-  request: NextRequest,
-  { params }: { params: { orderNo: string } }
+  request: Request,
+  { params }: { params: Promise<{ orderNo: string }> } 
 ) {
-  const orderNo = params.orderNo;
+  
+  const { orderNo } = await params; 
+  
+  const awbNumbers = ORDER_TO_AWBS_MAP[orderNo] || [];
 
-  // Dummy response structure
+  const shipments = awbNumbers.map(awb => {
+    const details = DUMMY_SHIPMENTS[awb];
+    return {
+      awbNumber: awb,
+      processCode: details.processCode,
+      shippingStatus: details.shippingStatus,
+      customerName: details.customerName,
+      shippedAt: details.shippedAt,
+      orders: AWB_TO_ORDERS_MAP[awb] 
+    };
+  });
+
   return NextResponse.json({
     data: {
       orderNo: orderNo,
-      awbNumbers: ["873549431322"],
-      shipments: [
-        {
-          awbNumber: "873549431322",
-          processCode: "P_7104",
-          shippingStatus: "SHIPPED",
-          customerName: "Gretchen Dziadosz",
-          shippedAt: "2026-06-25T17:34:33.147Z",
-          orders: [orderNo]
-        }
-      ]
+      awbNumbers: awbNumbers,
+      shipments: shipments
     }
   });
 }

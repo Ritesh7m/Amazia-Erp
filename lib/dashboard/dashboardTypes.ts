@@ -45,8 +45,9 @@ export interface OrderData {
   saleDate: string;
   sales: number;
   materialCost: number;
-  estimatedProfitBeforeShipping: number;
-  status: string;
+  dutyCost: number; 
+  estimatedProfitBeforeShipping: number; 
+  status: 'Profitable' | 'Loss' | 'Neutral';
 }
 
 export interface ActivityData {

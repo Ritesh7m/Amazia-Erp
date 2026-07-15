@@ -1,47 +1,58 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { getOrders } from '@/lib/dashboard/dashboardQueries';
 
-export const dynamic = 'force-dynamic';
-
-export async function GET(req: NextRequest) {
+export async function GET(request: Request) {
   try {
-    const { searchParams } = req.nextUrl;
+    const { searchParams } = new URL(request.url);
     const from = searchParams.get('from');
     const to = searchParams.get('to');
-    const q = searchParams.get('q') || '';
 
-    if (!from || !to) return new NextResponse('Missing dates', { status: 400 });
+    if (!from || !to) {
+      return new Response('Missing date range', { status: 400 });
+    }
 
-    // Fetch up to 10,000 records for the export
-    const { data } = await getOrders(from, to, 10000, 0, q);
+    const { data } = await getOrders(from, to, 100000, 0, '');
 
-    // Convert JSON to CSV string
-    const headers = ['Order No', 'Sale Date', 'Sales (INR)', 'Material Cost (INR)', 'Estimated Profit (INR)', 'Status'];
+    // 1. Define exact CSV Headers
+    const headers = [
+      'Order Number',
+      'AWB Number(s)',
+      'Customer Name',
+      'Date',
+      'Sales (INR)',
+      'Material Cost (INR)',
+      'Duty Cost (INR)',
+      'Book Expenses (INR)',
+      'Net Profit (INR)'
+    ];
+
+    // 2. Map data to CSV rows
     const csvRows = [headers.join(',')];
 
-    for (const row of data) {
-      csvRows.push([
-        row.orderNo,
-        row.saleDate,
-        row.sales,
-        row.materialCost,
-        row.estimatedProfitBeforeShipping,
-        row.status
-      ].join(','));
+    for (const order of data) {
+      const row = [
+        `"${order.orderNo}"`,
+        `"=""${order.awbNumbers}"""`, 
+        `"${order.customerName}"`, 
+        `"${order.saleDate}"`,
+        order.sales.toFixed(2),
+        order.materialCost.toFixed(2),
+        order.dutyCost.toFixed(2),
+        order.bookExpense.toFixed(2),
+        order.estimatedProfitBeforeShipping.toFixed(2)
+      ];
+      csvRows.push(row.join(','));
     }
 
     const csvString = csvRows.join('\n');
 
-    
-    return new NextResponse(csvString, {
-      status: 200,
+    return new Response(csvString, {
       headers: {
         'Content-Type': 'text/csv',
-        'Content-Disposition': `attachment; filename="Business_Report_${from}_to_${to}.csv"`,
+        'Content-Disposition': `attachment; filename="Amazia_ERP_Report_${from}_to_${to}.csv"`,
       },
     });
-
   } catch (error) {
-    return new NextResponse('Failed to generate export', { status: 500 });
+    console.error('Export API Error:', error);
+    return new Response('Failed to generate export report', { status: 500 });
   }
 }
