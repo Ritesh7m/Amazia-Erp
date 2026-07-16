@@ -1,172 +1,204 @@
 # Amazia ERP System Guide
 
- Project Introduction -> The **`Amazia ERP system`** is a web-based application designed to automate two critical business operations:
+1. `Introduction` -> **`Amazia ERP`** is a centralized data processing system that automates billing imports and inventory synchronization. It validates, normalizes, and stores data from multiple sources into DuckDB, providing a reliable foundation for reporting, reconciliation, and operational analytics.
 
- 1. **`Billing Import`** --> Imports billing statements from providers such as FedEx and Etsy, validates and normalizes the data, prevents duplicate imports using SHA-256 hashing, and stores the processed records in DuckDB. 
+2. `Core Architecture` -> 
+                                AMAZIA ERP
+                                    │
+              ┌─────────────────────┴────────────────────┐
+              │                                          │
+              ▼                                          ▼
+     Next.js Web Application                  Inventory Scheduler
+          npm run dev                          npm run scheduler
+              │                                          │
+              │                                          │
+              ├── Dashboard                              ├── Runs every 6 hours
+              ├── Upload Interface                       ├── Reads Google Sheets
+              ├── Etsy Import API                        ├── Reads only new rows
+              ├── FedEx Import API                       ├── Normalizes order IDs
+              ├── Dashboard APIs                         ├── Aggregates quantities
+              ├── Search API                             └── Saves data to DuckDB
+              ├── Shipment Mapping
+              ├── Financial Reporting
+              └── DuckDB Reads/Writes
+                              │
+                              ▼
+                           DuckDB
+                              │
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+          ▼                   ▼                   ▼
+      Etsy Sales        FedEx Expenses       Inventory Data
+          │                   │                   │
+          └───────────────────┼───────────────────┘
+                              │
+                              ▼
+                    Order-to-AWB Mapping
+                              │
+                              ▼
+                 Accounting Reconciliation
+                              │
+                              ▼
+        Dashboard, Search, Details, and CSV Reports
+    
+`Phase 1: Billing Import` -> Imports, validates, normalizes, and stores FedEx or Etsy billing CSV data into DuckDB.
 
- 2. **`Inventory Synchronization`** --> Automatically synchronizes inventory data from Google Sheets into DuckDB using a scheduler. Instead of re-reading the entire sheet, the scheduler processes only newly added rows using a lastProcessedRow checkpoint, ensuring efficient incremental synchronization.
+`Phase 2: Inventory Synchronization` -> Synchronizes newly added Google Sheet inventory records into DuckDB using incremental processing.
 
- # High-Level System Overview
+`Phase 3: Centralized Data Storage` -> Maintains DuckDB as the single source of truth for billing and inventory data.
 
-                     Amazia ERP
-                         │
-      ┌──────────────────┴──────────────────┐
-      │                                     │
-      ▼                                     ▼
- Billing Import Module          Inventory Sync Module
-      │                                     │
-      ▼                                     ▼
- Parse & Validate CSV          Read New Google Sheet Rows
-      │                                     │
-      ▼                                     ▼
- Normalize Data               Normalize & Aggregate
-      │                                     │
-      ▼                                     ▼
-      DuckDB Database (Single Source of Truth)
-                         │
-                         ▼
-              Dashboard & Reporting
+`Phase 4: Dashboard & Reporting` -> Retrieves processed data from DuckDB to generate fast and reliable dashboards and reports.
 
-# Root Directory Structure
-Amazia-ERP/
-│
-├── app/
-├── components/
-├── constants/
-├── database/
-├── services/
-├── types/
-├── utils/
-│
-├── .env.local
-├── .gitignore
-├── eslint.config.mjs
-├── instrumentation.ts
-├── next.config.ts
-├── package.json
-├── postcss.config.mjs
-├── README.md
-└── tsconfig.json
+`Phase 5: Data Management` -> Provides clean, validated, and centralized data for business analysis and operational reporting.
 
-# Technology Stack
+# Phase 1: Data Ingestion and Synchronization: 
+Amazia ERP acts as a central data hub, importing raw information from multiple independent sources. The application standardizes, validates, and stores curated records inside DuckDB.
 
-1. DuckDB-> Stores all billing and inventory data locally and serves as the primary reporting database.
-2. Google APIs-> Reads inventory data from Google Sheets during synchronization.
-3. node-cron-> Executes the inventory synchronization scheduler at predefined intervals.
-4. csv-parser-> Parses uploaded CSV files from different billing providers.
-5. dayjs-> Handles date parsing and formatting throughout the application.
-6. Zod-> Validates request payloads and user input.
-7. Sonner-> Displays success, warning, and error notifications in the user interface.
-8. React Hook Form-> Manages form handling in the upload interface.
+# Etsy Statements (Sales Data):  
 
+The Etsy Statement Import module processes sales information via CSV upload.
+ -> Target Table: etsy_statement
+ ->  Relevant Fields: date, type, order_no, net_amt, created_at
 
+# Etsy Processing Rules & Validation:
 
-# Directory Structure & Responsibilities
+Accept .csv and .CSV files (case-insensitive extension validation)
+Process only required Etsy transaction types (e.g., "Sale").
+Extract order numbers from transaction descriptions (e.g., "Payment for Order #4105054431" → 4105054431).
+Normalize dates before database insertion and store timestamps consistently.
 
-    1. app/api/: Backend API endpoints.
-      -->import/etsy/route.ts & import/fedex/route.ts: Dedicated routes for handling data ingestion from Etsy and FedEx.
-      -->inventory/sync/route.ts: Endpoint for triggering inventory synchronization.
+Example: 
+{
+  "date": "2026-06-30",
+  "type": "Sale",
+  "order_no": "4105054431",
+  "net_amt": 2810
+}
 
-    2. components/: Contains reusable UI elements, notably the UploadCard.tsx in the upload directory.
+# FedEx Billing (Expense Data): 
 
-    3. database/: Stores the local AmaziaERP.db file and its main entry point (index.ts).
+The FedEx Billing Import module captures shipping, duty, tax, and transportation expenses.
+ -> Target Table: fedex_billing
+ -> Relevant Fields: invoice_type, invoice_date, due_date, awb_number, air_waybill_total_amount, book_expense_cost, created_at
 
-    4. services/: Contains the core business logic responsible for parsing, importing, processing, and synchronizing data across the application.
+`Book Expense Cost Calculation`: Calculated automatically during import and rounded to standard financial precision.
+ -> Formula: Book Expense Cost = Amount × 18 / 118
 
-# 3. database/: these are the tables in the database 
-    --> etsy_statement
-    --> fedex_billing
-    --> import_history
-    --> inventory_table
-    --> sync_metadata 
-1. See all Etsy statement records
-SELECT
-    id,
-    order_no,
-    date,
-    type,
-    net_amt
-FROM etsy_statement
-ORDER BY date DESC;
+# Inventory Google Sheet
 
-2. See all FedEx billing records
-SELECT
-    id,
-    invoice_type,
-    invoice_date,
-    due_date,
-    awb_number,
-    air_waybill_total_amount,
-    book_expense_cost
-FROM fedex_billing
-ORDER BY invoice_date DESC;
+Inventory data is fetched dynamically from the "DB" tab of a configured Google Sheet.
 
-3. See all inventory records
-SELECT
-    id,
-    order_no,
-    material_type,
-    category,
-    color,
-    quantity,
-    updated_at
-FROM inventory_table
-ORDER BY updated_at DESC;
+Required Source Columns:
 
-4. See all import history
-SELECT
-    id,
-    file_name,
-    invoice_type,
-    status,
-    total_rows,
-    imported_rows,
-    failed_rows,
-    processing_time,
-    created_at
-FROM import_history
-ORDER BY created_at DESC;
+B: Order ID
+D: Material Type
+E: Category
+F: Color
+G: Quantity
 
-5. View inventory synchronization status
-SELECT
-    sync_name,
-    last_processed_row,
-    last_sync_at
-FROM sync_metadata;
+`Inventory Order Normalization:`-> Google Sheets often contain item-level suffixes (e.g., -1, -2). The dashboard requires order-level data. The system strips the suffix.
+Example: 
+4104705089-1 becomes 4104705089
+4104705089-2 becomes 4104705089 
 
-# Quick Troubleshooting Map
-| Problem                     | First table to check           |
-| --------------------------- | ------------------------------ |
-| File not importing          | `import_history`               |
-| Duplicate file upload       | `import_history` (`file_hash`) |
-| Import partially completed  | `import_history`               |
-| Missing FedEx invoice       | `fedex_billing`                |
-| Incorrect AWB billing       | `fedex_billing`                |
-| Missing Etsy transaction    | `etsy_statement`               |
-| Incorrect Etsy order amount | `etsy_statement`               |
-| Inventory not updated       | `inventory_table`              |
-| Duplicate inventory record  | `inventory_table`              |
-| Inventory sync stopped      | `sync_metadata`                |
-| Sync resumed from wrong row | `sync_metadata`                |
+`Quantity Aggregation:`-> All quantities mapped to the same normalized Order ID are summed together.
 
-# If you only remember one thing:
+Input: 4104705089-1 → 3.1, 4104705089-2 → 3.0
 
-import_history tracks every file import and its processing status.
-fedex_billing stores imported FedEx invoice and shipping cost details.
-etsy_statement stores imported Etsy transaction records.
-inventory_table is the primary inventory dataset used by the application.
-sync_metadata tracks inventory synchronization progress and enables incremental syncs.
+Aggregated Result: {"4104705089": 6.1}
 
-# For most debugging:
+Material Cost Calculation: The current hardcoded material-cost rate is 1 Quantity = ₹250.
 
-Start with import_history to verify the file was imported successfully.
-Check fedex_billing or etsy_statement to confirm the imported data exists.
-Verify inventory_table if inventory values appear incorrect or missing.
-Finally, check sync_metadata if inventory synchronization did not complete or resumed from an unexpected row.
+Formula: Material Cost = Total Quantity × ₹250
+(Example: 6.1 × 250 = ₹1,525)
 
-    # 4 services/: 
-    etsyImporter.ts: Handles the import workflow for Etsy statement files, including validation, parsing, and database insertion.
+# Order-to-AWB Mapping
 
+Supported Mapping Relationships: The system must safely handle all three scenarios:
+
+1. One Order → One AWB
+
+2. One Order → Multiple AWBs
+
+3. One AWB → Multiple Orders
+
+Example API Payload (GET /api/shipments/orders/4074621797):
+
+{
+  "data": {
+    "orderNo": "4074621797",
+    "awbNumbers": [
+      "873549431322"
+    ],
+    "shipments": [
+      {
+        "awbNumber": "873549431322",
+        "processCode": "P_7104",
+        "shippingStatus": "SHIPPED",
+        "customerName": "Gretchen Dziadosz",
+        "shippedAt": "2026-06-25T17:34:33.147Z",
+        "orders": [
+          "4074621797"
+        ]
+      }
+    ]
+  }
+}
+
+# Phase 2: Accounting and Reconciliation Engine:
+All dashboard calculations and financial aggregations are performed on the Next.js backend in **lib/dashboard/dashboardQueries.ts**, and the frontend simply displays the processed results from DuckDB.
+
+`Material Cost Reconciliation`-> **Formula: Material Cost = Total Quantity × ₹250**
+
+`FedEx Shipping Cost Allocation` -> **Formula: Allocated Shipping Cost = Total AWB Cost ÷ Number of Mapped Orders**
+
+    Example: AWB 873549431322 (Cost: ₹600) maps to three distinct orders (4104705089, 4104705090, 4104705091).
+    Result: The cost is divided equally among the orders (₹600 / 3 = ₹200 per order).   
+
+`One Order with Multiple AWBs`->  **Formula: Order FedEx Cost = Σ (AWB Cost ÷ Number of Orders Mapped to that AWB)**
+
+`Net Profit & Profit Margin Calculation`-> **Net Profit = Gross Sales − Material Cost − Duty Cost − Transport Cost**
+                                           **Profit Margin Formula: Profit Margin (%) = (Net Profit ÷ Gross Sales) × 100**
+
+# Phase 3: Dashboard Interface:
+
+`**Dashboard Metrics**`-> The dashboard displays high-level key performance indicators (KPIs) calculated by the backend:
+
+1. Total Sales: SUM(Etsy Net Sales)
+
+2. Total Material Cost: SUM(Order Material Costs)
+
+3. Total FedEx Cost: Total Allocated Duty Cost + Total Allocated Transportation Cost
+
+4. Total Expenses: Material Cost + Duty Cost + Transportation Cost
+
+5. Gross Profit (Direct NPF): Total Sales - Total Expenses
+
+6. Profit Margin: (Gross Profit / Total Sales) × 100
+
+`**Visualizations**`--> The activity graph plots financial performance over time, displaying Sales, Expenses, and Net Profit.
+Default Period: Last 12 months (configurable via config.json).
+
+`**Dynamic Date Filtering**`-> The dashboard supports robust, URL-driven preset date filters (e.g., 7D, 30D, 3M, 6M, 12M, FY, Custom).
+
+# Phase 4: Search and Order Investigation: 
+
+// GET /api/dashboard/search?q={query} 
+
+1. `Live Search `-> The dashboard provides a debounced search that allows users to quickly find records using either an Etsy Order Number or a FedEx AWB Number, returning related order and shipment information.
+
+2. `Search Results`-> Matching records are displayed in an interactive dropdown with loading states, keyboard navigation, and click-outside support for a smooth user experience.
+
+3. `Order Details` -> Selecting a search result opens a detailed view showing financial metrics, shipment information, and order details, while safely handling missing or invalid data.
+
+# Phase 5: Financial Report Export
+
+`Export Workflow` -> Frontend reads the active date bounds from the URL (e.g., from=2026-06-01 and to=2026-06-30).
+
+# Scheduler Configuration & Frequency
+
+The scheduler runs every six hours based on the Asia/Kolkata timezone.
+Cron Expression: 0 */6 * * *. Execution Times (IST): 12:00 AM, 6:00 AM, 12:00 PM, 6:00 PM.
 
 
 

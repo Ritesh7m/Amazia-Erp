@@ -18,12 +18,22 @@ export const fetchNewInventoryRows = async (lastProcessedRow: number) => {
   // EXPANDED RANGE: Fetch from Column A all the way to Column H
   const range = `DB!A${startRow}:H`;
 
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range,
-  });
+  let rows: any[] = [];
 
-  const rows = response.data.values || [];
+  try {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range,
+    });
+    rows = response.data.values || [];
+  } catch (error: any) {
+    
+    if (error.message && error.message.includes('exceeds grid limits')) {
+      console.log(`[Scheduler]  Reached the end of the sheet. No new rows to sync.`);
+      return []; 
+    }
+     throw error;
+  }
   
   return rows.map((row, index) => ({
     rowIndex: startRow + index,

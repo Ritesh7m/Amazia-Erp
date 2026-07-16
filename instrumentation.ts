@@ -20,8 +20,8 @@ export async function register() {
 
     console.log("[System] Internal Cron Scheduler Initialized.");
 
-    // Runs every 6 hours
-    cron.default.schedule("0 */6 * * *", async () => {
+    // Runs every 6 hours "0 */6 * * *"
+    cron.default.schedule("*/2 * * * *", async () => { 
       console.log("-----------------------------------");
       console.log("[Cron]  Automatic Trigger Activated!");
 
