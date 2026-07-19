@@ -1,34 +1,39 @@
-'use client';
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+"use client";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 // UI Components
-import DashboardFilters from '@/components/dashboard/DashboardFilters';
-import MetricCard from '@/components/dashboard/MetricCard';
-import BusinessPerformanceChart from '@/components/dashboard/BusinessPerformanceChart';
-import ExpenseBreakdownChart from '@/components/dashboard/ExpenseBreakdownChart';
+import DashboardFilters from "@/components/dashboard/DashboardFilters";
+import MetricCard from "@/components/dashboard/MetricCard";
+import BusinessPerformanceChart from "@/components/dashboard/BusinessPerformanceChart";
+import ExpenseBreakdownChart from "@/components/dashboard/ExpenseBreakdownChart";
 
 // Types
-import { 
-  DashboardSummaryResponse, 
-  ChartDataPoint, 
-  ExpenseBreakdownPoint, 
-  OrderData, 
-  ActivityData 
-} from '@/lib/dashboard/dashboardTypes';
+import {
+  DashboardSummaryResponse,
+  ChartDataPoint,
+  ExpenseBreakdownPoint,
+  OrderData,
+  ActivityData,
+} from "@/lib/dashboard/dashboardTypes";
 
 export default function DashboardPage() {
   const searchParams = useSearchParams();
-  const from = searchParams.get('from');
-  const to = searchParams.get('to');
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
 
   // State Management
-  const [summaryData, setSummaryData] = useState<DashboardSummaryResponse['data'] | null>(null);
+  const [summaryData, setSummaryData] = useState<
+    DashboardSummaryResponse["data"] | null
+  >(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
-  const [expenseData, setExpenseData] = useState<{ data: ExpenseBreakdownPoint[], total: number }>({ data: [], total: 0 });
+  const [expenseData, setExpenseData] = useState<{
+    data: ExpenseBreakdownPoint[];
+    total: number;
+  }>({ data: [], total: 0 });
   const [ordersData, setOrdersData] = useState<OrderData[]>([]);
   const [activityData, setActivityData] = useState<ActivityData[]>([]);
-  
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,16 +45,16 @@ export default function DashboardPage() {
     const fetchDashboardData = async () => {
       setLoading(true);
       setError(null);
-      
+
       try {
         const [sumRes, perfRes, expRes, ordRes, actRes] = await Promise.all([
           fetch(`/api/dashboard/summary?from=${from}&to=${to}`),
           fetch(`/api/dashboard/performance?from=${from}&to=${to}`),
           fetch(`/api/dashboard/expense-breakdown?from=${from}&to=${to}`),
           fetch(`/api/dashboard/orders?from=${from}&to=${to}&limit=5`), // Max 5 for preview
-          fetch(`/api/dashboard/activity?limit=3`) // Max 3 for preview
+          fetch(`/api/dashboard/activity?limit=3`), // Max 3 for preview
         ]);
-        
+
         const sumResult = await sumRes.json();
         const perfResult = await perfRes.json();
         const expResult = await expRes.json();
@@ -58,30 +63,32 @@ export default function DashboardPage() {
 
         if (sumResult.success) setSummaryData(sumResult.data);
         if (perfResult.success) setChartData(perfResult.data);
-        if (expResult.success) setExpenseData({ data: expResult.data, total: expResult.total });
+        if (expResult.success)
+          setExpenseData({ data: expResult.data, total: expResult.total });
         if (ordResult.success) setOrdersData(ordResult.data);
         if (actResult.success) setActivityData(actResult.data);
-
       } catch (err) {
-        setError('Network error loading dashboard data');
+        setError("Network error loading dashboard data");
       } finally {
         setLoading(false);
       }
     };
 
     fetchDashboardData();
-  }, [from, to]); 
+  }, [from, to]);
 
   // Format the comparison text string dynamically based on the date range
   const getComparisonText = () => {
-    if (!from || !to) return 'vs previous period';
-    const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 3600 * 24));
-    if (days <= 7) return 'vs previous 7 days';
-    if (days <= 31) return 'vs previous 30 days';
-    if (days <= 93) return 'vs previous 3 months';
-    if (days <= 186) return 'vs previous 6 months';
-    if (days <= 366) return 'vs previous 12 months';
-    return 'vs previous period';
+    if (!from || !to) return "vs previous period";
+    const days = Math.round(
+      (new Date(to).getTime() - new Date(from).getTime()) / (1000 * 3600 * 24),
+    );
+    if (days <= 7) return "vs previous 7 days";
+    if (days <= 31) return "vs previous 30 days";
+    if (days <= 93) return "vs previous 3 months";
+    if (days <= 186) return "vs previous 6 months";
+    if (days <= 366) return "vs previous 12 months";
+    return "vs previous period";
   };
 
   return (
@@ -96,8 +103,8 @@ export default function DashboardPage() {
 
       {/* KPI Cards Grid (Step 4) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-        <MetricCard 
-          title="Total Sales" 
+        <MetricCard
+          title="Total Sales"
           value={summaryData?.totalSales.value || 0}
           changePercentage={summaryData?.totalSales.changePercentage}
           trend={summaryData?.totalSales.trend}
@@ -105,8 +112,8 @@ export default function DashboardPage() {
           isLoading={loading}
           comparisonText={getComparisonText()}
         />
-        <MetricCard 
-          title="Total Expenses" 
+        <MetricCard
+          title="Total Expenses"
           value={summaryData?.totalExpenses.value || 0}
           changePercentage={summaryData?.totalExpenses.changePercentage}
           trend={summaryData?.totalExpenses.trend}
@@ -115,8 +122,8 @@ export default function DashboardPage() {
           inverseTrendColor={true} // High expenses = warning color
           comparisonText={getComparisonText()}
         />
-        <MetricCard 
-          title="Gross Profit" 
+        <MetricCard
+          title="Gross Profit"
           value={summaryData?.grossProfit.value || 0}
           changePercentage={summaryData?.grossProfit.changePercentage}
           trend={summaryData?.grossProfit.trend}
@@ -124,14 +131,14 @@ export default function DashboardPage() {
           isLoading={loading}
           comparisonText={getComparisonText()}
         />
-        <MetricCard 
-          title="Profit Margin" 
+        <MetricCard
+          title="Profit Margin"
           value={summaryData?.profitMargin.value || 0}
           changePercentage={summaryData?.profitMargin.changePercentage}
           trend={summaryData?.profitMargin.trend}
           suffix="%"
           isLoading={loading}
-          comparisonText={getComparisonText().replace('vs', 'pp vs')} // pp = percentage points
+          comparisonText={getComparisonText().replace("vs", "pp vs")} // pp = percentage points
         />
       </div>
 
@@ -141,11 +148,13 @@ export default function DashboardPage() {
           <BusinessPerformanceChart data={chartData} isLoading={loading} />
         </div>
         <div>
-          <ExpenseBreakdownChart data={expenseData.data} total={expenseData.total} isLoading={loading} />
+          <ExpenseBreakdownChart
+            data={expenseData.data}
+            total={expenseData.total}
+            isLoading={loading}
+          />
         </div>
       </div>
-
-
     </div>
   );
 }

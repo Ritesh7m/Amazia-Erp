@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
-// Regex: STRICTLY 10 digits, optionally followed by a single hyphen and more digits.
 // Valid: "3506453055", "3556473800-1"
 // Invalid: "3278-2" (too short), "Allison zumstein" (text)
-const orderIdRegex = /^\d{10}(-\d+)?$/;
+// const orderIdRegex = /^\d{10}(-\d+)?$/;
+const orderIdRegex = /^\d+(-\d+)?$/; // this accepts any number of digits, optionally followed by a hyphen and more digits, but does not enforce a strict 10-digit requirement
 
 export const inventoryRowSchema = z.object({
   rowIndex: z.number(),
