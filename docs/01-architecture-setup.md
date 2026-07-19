@@ -16,10 +16,13 @@ Amazia ERP is built using a modern full-stack JavaScript ecosystem, with a focus
 ### Environment Variables
 Create a `.env.local` file in the root directory. This securely connects your app to Google Sheets for inventory syncing.
 ```env
-GOOGLE_SHEET_ID="your_google_sheet_id_here"
-GOOGLE_SHEET_TAB_NAME="DB"
-GOOGLE_SERVICE_ACCOUNT_EMAIL="your_service_email@gserviceaccount.com"
-GOOGLE_PRIVATE_KEY="your_private_key"
+# Google Sheets API Credentials
+GOOGLE_CLIENT_EMAIL="your-service-account@your-project.iam.gserviceaccount.com"
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYour\nPrivate\nKey\nHere\n-----END PRIVATE KEY-----"
+GOOGLE_SPREADSHEET_ID="your_google_sheet_id_here"
+
+# Security for the Sync Endpoint
+CRON_SECRET="amaziaErp!123"
 ```
 *(Note: Never commit your `.env.local` file to version control.)*
 
