@@ -8,7 +8,7 @@ import { processAndAggregateInventory } from './inventoryProcessor';
 export const runInventorySync = async () => {
   const startTime = Date.now();
   console.log('-----------------------------------');
-  console.log('[Scheduler] 🚀 Started Inventory Sync');
+  console.log('[Scheduler]  Started Inventory Sync');
 
   try {
     // 1. Read Metadata
@@ -16,14 +16,14 @@ export const runInventorySync = async () => {
       `SELECT last_processed_row FROM sync_metadata WHERE sync_name = 'inventory'`
     );
     const lastProcessedRow = metadata[0]?.last_processed_row || 1;
-    console.log(`[Scheduler] 📍 Resuming from row: ${lastProcessedRow}`);
+    console.log(`[Scheduler] Resuming from row: ${lastProcessedRow}`);
 
     // 2. Fetch new rows only
     const apiStartTime = Date.now();
-    console.log(`[Scheduler] 🌐 Fetching data from Google Sheets...`);
+    console.log(`[Scheduler]  Fetching data from Google Sheets...`);
     const rawRows = await fetchNewInventoryRows(lastProcessedRow);
     const apiTime = Date.now() - apiStartTime;
-    console.log(`[Scheduler] ✅ Downloaded ${rawRows.length} rows in ${apiTime}ms`);
+    console.log(`[Scheduler]  Downloaded ${rawRows.length} rows in ${apiTime}ms`);
 
     if (rawRows.length === 0) {
       console.log(`[Scheduler] 🏁 No new rows found. Sync complete.`);

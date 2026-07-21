@@ -2,6 +2,33 @@
 
 Amazia ERP relies on three primary data sources. Data imported from Etsy Statements, FedEx Billing CSVs, and Google Sheets Inventory is validated, normalized, and stored in DuckDB before being used by the Accounting Engine.
 
+## Order-to-AWB Mapping
+
+The system dynamically links Etsy sales to FedEx shipments. It must safely handle all three scenarios to prevent double-counting expenses:
+1. **One Order → One AWB:** Standard shipment.
+2. **One Order → Multiple AWBs:** Split shipments (e.g., backorders or multi-box orders).
+3. **One AWB → Multiple Orders:** Combined shipments (e.g., one box containing three different orders for the same customer).
+
+## Accounting and Reconciliation Engine
+
+All dashboard calculations and financial aggregations are performed on the Next.js backend in `lib/dashboard/dashboardQueries.ts`. The frontend simply displays the processed results from DuckDB.
+
+### Core Financial Formulas
+
+* **Material Cost Reconciliation:**
+  `Material Cost = Total Quantity × (multiplyer)`
+* **FedEx Shipping Cost Allocation:**
+  Calculates the cost when multiple orders share one AWB.
+  `Allocated Shipping Cost = Total AWB Cost ÷ Number of Mapped Orders`
+  *(Example: AWB 873549431322 costs ₹600 and maps to 3 distinct orders. The cost is divided equally: ₹600 / 3 = ₹200 per order.)*
+* **One Order with Multiple AWBs:**
+  Calculates the cost when one order is split across several shipments.
+  `Order FedEx Cost = Σ (AWB Cost ÷ Number of Orders Mapped to that AWB)`
+* **Net Profit:**
+  `Net Profit = Gross Sales − Material Cost − Duty Cost − Transport Cost`
+* **Profit Margin:**
+  `Profit Margin (%) = (Net Profit ÷ Gross Sales) × 100`
+
 ## 1. Etsy Statement Import
 Etsy sales transaction data is imported via CSV files downloaded from the Etsy seller dashboard.
 

@@ -17,11 +17,12 @@ export async function register() {
   try {
     const cron = await import("node-cron");
     const { runInventorySync } = await import("./services/inventorySync");
+    const { runBackupWorkflow } = await import("./lib/backup/backupService");
 
     console.log("[System] Internal Cron Scheduler Initialized.");
 
-    // Runs every 6 hours "0 */6 * * *"
-    cron.default.schedule("*/2 * * * *", async () => { 
+    // Inventory Sync: Runs every 6 hours "0 */6 * * *"
+    cron.default.schedule("0 */6 * * *", async () => { 
       console.log("-----------------------------------");
       console.log("[Cron]  Automatic Trigger Activated!");
 
@@ -31,6 +32,21 @@ export async function register() {
       } catch (error) {
         console.error("[Cron]  Automatic Sync Failed:", error);
       }
+    });
+
+    // Daily Backup: Runs every day at 11:00 AM "0 11 * * *"
+    cron.default.schedule("0 11 * * *", async () => { 
+      console.log("-----------------------------------");
+      console.log("[Cron]  Daily Backup Trigger Activated!");
+
+      try {
+        await runBackupWorkflow();
+        console.log("[Cron]  Daily Backup Completed.");
+      } catch (error) {
+        console.error("[Cron]  Daily Backup Failed:", error);
+      }
+    }, {
+      timezone: process.env.TIMEZONE || "Asia/Kolkata"
     });
 
     // Uncomment this if you want to run once immediately on server startup.
