@@ -1,10 +1,12 @@
 import type { Connection } from 'duckdb';
 import { parseEtsyCsv } from '@/services/etsyParser';
+import { allocateListingExpenses } from '@/services/listingAllocation';
 import { generateFileHash } from '@/utils/crypto';
 import { fetchQuery, executeTransaction, executePreparedStatement, getConnection } from '@/database';
 import { ApiResponse } from '@/types';
 import { SUPPORTED_INVOICE_TYPES, HTTP_STATUS } from '@/constants';
 import { etsyRowSchema } from '@/utils/validation';
+import { ETSY_EXPENSE_TYPES } from '@/config/appConfig';
 
 interface ImportResult {
   status: number;
@@ -20,6 +22,7 @@ export const processEtsyImport = async (
   const fileHash = generateFileHash(fileBuffer);
 
   try {
+    // ─── DUPLICATE FILE CHECK ──────────────────────────────────────
     const existing = await fetchQuery<{ id: number }>(
       `SELECT id FROM import_history WHERE file_hash = ?`,
       [fileHash]
@@ -32,25 +35,26 @@ export const processEtsyImport = async (
       };
     }
 
-    const records = await parseEtsyCsv(fileBuffer);
+    // ─── PARSE: Extract both sale records and expense records ───────
+    const { saleRecords, expenseRecords } = await parseEtsyCsv(fileBuffer, fileHash);
 
-    if (records.length === 0) {
+    if (saleRecords.length === 0 && expenseRecords.length === 0) {
       return {
         status: HTTP_STATUS.UNPROCESSABLE_ENTITY,
-        data: { success: false, message: 'No valid Etsy Sale records found in the uploaded file.' }
+        data: { success: false, message: 'No valid Etsy records found in the uploaded file.' }
       };
     }
 
-    // --- PHASE 11: Strict Zod Validation ---
+    // ─── VALIDATE SALE RECORDS ─────────────────────────────────────
     let failedRowCount = 0;
-    for (const record of records) {
+    for (const record of saleRecords) {
       const validation = etsyRowSchema.safeParse(record);
       if (!validation.success) {
         failedRowCount++;
       }
     }
 
-    // Rollback on any failure, no partial imports
+    // Rollback on any sale validation failure, no partial imports
     if (failedRowCount > 0) {
       const processingTime = Date.now() - startTime;
       const conn = await getConnection();
@@ -63,7 +67,7 @@ export const processEtsyImport = async (
       
       await executePreparedStatement(conn, failHistoryQuery, [
         fileName, fileHash, fileSize, 'FAILED', SUPPORTED_INVOICE_TYPES.ETSY,
-        records.length, 0, failedRowCount, processingTime
+        saleRecords.length, 0, failedRowCount, processingTime
       ]);
 
       return {
@@ -71,7 +75,7 @@ export const processEtsyImport = async (
         data: {
           success: false,
           message: 'Validation failed.',
-          totalRows: records.length,
+          totalRows: saleRecords.length,
           importedRows: 0,
           failedRows: failedRowCount,
           processingTime
@@ -79,20 +83,70 @@ export const processEtsyImport = async (
       };
     }
 
-    // Database Transaction
+    // ─── DATABASE TRANSACTION ──────────────────────────────────────
+    // Upload → Parse → Normalize → Validate → Calculate →
+    // Begin Transaction → Insert Etsy records → Insert Etsy expenses →
+    // Create listing allocations → Commit
+    // Critical failure → ROLLBACK, no partial financial data.
+    
+    const totalRows = saleRecords.length + expenseRecords.length;
+
     await executeTransaction(async (conn: Connection) => {
-      const insertRecordQuery = `
+      // 1. Insert sale records into etsy_statement
+      const insertSaleQuery = `
         INSERT INTO etsy_statement (
           order_no, date, type, net_amt
         ) VALUES (?, ?, ?, ?)
       `;
 
-      for (const record of records) {
-        await executePreparedStatement(conn, insertRecordQuery, [
+      for (const record of saleRecords) {
+        await executePreparedStatement(conn, insertSaleQuery, [
           record.order_no, record.date, record.type, record.net_amt
         ]);
       }
 
+      // 2. Insert ALL expense records into etsy_expenses
+      //    (Raw listing expenses store listing_id with empty order_no; allocated listing expenses get assigned order_no)
+      const insertExpenseQuery = `
+        INSERT INTO etsy_expenses (
+          order_no, expense_type, expense_amount, 
+          source_transaction_type, source_description, listing_id, import_reference
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT DO NOTHING
+      `;
+
+      for (const expense of expenseRecords) {
+        await executePreparedStatement(conn, insertExpenseQuery, [
+          expense.order_no,
+          expense.expense_type,
+          expense.expense_amount,
+          expense.source_transaction_type,
+          expense.source_description,
+          expense.listing_id,
+          expense.import_reference,
+        ]);
+      }
+
+      // 3. Run listing allocation logic for eligible orders
+      const saleOrderNos = saleRecords.map(r => r.order_no).filter(o => o.length > 0);
+      const allocationRecords = await allocateListingExpenses(
+        conn, expenseRecords, saleOrderNos, fileHash
+      );
+
+      // Insert allocated listing expense records
+      for (const alloc of allocationRecords) {
+        await executePreparedStatement(conn, insertExpenseQuery, [
+          alloc.order_no,
+          alloc.expense_type,
+          alloc.expense_amount,
+          alloc.source_transaction_type,
+          alloc.source_description,
+          alloc.listing_id,
+          alloc.import_reference,
+        ]);
+      }
+
+      // 4. Record import history
       const processingTime = Date.now() - startTime;
       const historyQuery = `
         INSERT INTO import_history (
@@ -103,16 +157,19 @@ export const processEtsyImport = async (
       
       await executePreparedStatement(conn, historyQuery, [
         fileName, fileHash, fileSize, 'SUCCESS', SUPPORTED_INVOICE_TYPES.ETSY,
-        records.length, records.length, 0, processingTime
+        totalRows, totalRows, 0, processingTime
       ]);
     });
 
     return {
       status: HTTP_STATUS.OK,
       data: {
-        success: true, message: 'Import completed successfully.',
-        totalRows: records.length, importedRows: records.length,
-        failedRows: 0, processingTime: Date.now() - startTime
+        success: true, 
+        message: `Import completed successfully. ${saleRecords.length} sales and ${expenseRecords.length} expenses processed.`,
+        totalRows: totalRows, 
+        importedRows: totalRows,
+        failedRows: 0, 
+        processingTime: Date.now() - startTime
       }
     };
 

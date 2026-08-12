@@ -18,3 +18,13 @@ export const etsyRowSchema = z.object({
   type: z.literal("Sale"),
   net_amt: z.number()
 });
+
+export const etsyExpenseRowSchema = z.object({
+  order_no: z.string(), // Can be empty for non-order expenses like listing fees
+  expense_type: z.string().min(1, "Expense type is required"),
+  expense_amount: z.number().min(0, "Expense amount must be non-negative"),
+  source_transaction_type: z.string(),
+  source_description: z.string(),
+  listing_id: z.string().nullable(),
+  import_reference: z.string(),
+});

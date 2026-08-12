@@ -41,6 +41,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# .gitignore
+# database & locks
+database/
 *.duckdb
 *.duckdb.wal
+*.db
+*.db.wal
+*.wal

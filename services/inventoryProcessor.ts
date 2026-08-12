@@ -1,8 +1,6 @@
 import { RawSheetRow, InventoryRecord } from '@/types/inventory';
 import { inventoryRowSchema } from '@/utils/inventoryValidation';
 
-const MATERIAL_COST_MULTIPLIER = 250;
-
 export const processAndAggregateInventory = (
   rawRows: RawSheetRow[]
 ): { validRecords: InventoryRecord[]; skippedCount: number; maxRowIndex: number } => {

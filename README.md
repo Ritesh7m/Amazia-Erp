@@ -235,12 +235,22 @@ curl -X POST http://localhost:3000/api/shipments/sync
   "success": true,
   "message": "Successfully mapped 6 AWB connections to orders in the database."
 }
+
 ```
+### backup End point for manullay triged 
 
----
+```json
+  http://localhost:3000/api/backup
+```
+### Rest DataBase 
 
-# Documentation
+```json
+ npm run db:reset 
+  
+ ```
 
+###  Documentation
+```
 Complete project documentation is available inside the **docs/** directory.
 
 | Document | Description |

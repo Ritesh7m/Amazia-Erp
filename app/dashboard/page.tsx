@@ -1,12 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 
 // UI Components
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
 import MetricCard from "@/components/dashboard/MetricCard";
 import BusinessPerformanceChart from "@/components/dashboard/BusinessPerformanceChart";
 import ExpenseBreakdownChart from "@/components/dashboard/ExpenseBreakdownChart";
+import OrdersTable from "@/components/dashboard/OrdersTable";
 
 // Types
 import {
@@ -14,11 +15,12 @@ import {
   ChartDataPoint,
   ExpenseBreakdownPoint,
   OrderData,
-  ActivityData,
 } from "@/lib/dashboard/dashboardTypes";
 
-export default function DashboardPage() {
+function DashboardContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const from = searchParams.get("from");
   const to = searchParams.get("to");
 
@@ -32,10 +34,12 @@ export default function DashboardPage() {
     total: number;
   }>({ data: [], total: 0 });
   const [ordersData, setOrdersData] = useState<OrderData[]>([]);
-  const [activityData, setActivityData] = useState<ActivityData[]>([]);
+  const [ordersMeta, setOrdersMeta] = useState({ totalRecords: 0, page: 1, pageSize: 10, totalPages: 1 });
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const currentPage = parseInt(searchParams.get("page") || "1") || 1;
 
   // Fetch all dashboard data concurrently
   useEffect(() => {
@@ -47,26 +51,31 @@ export default function DashboardPage() {
       setError(null);
 
       try {
-        const [sumRes, perfRes, expRes, ordRes, actRes] = await Promise.all([
+        const [sumRes, perfRes, expRes, ordRes] = await Promise.all([
           fetch(`/api/dashboard/summary?from=${from}&to=${to}`),
           fetch(`/api/dashboard/performance?from=${from}&to=${to}`),
           fetch(`/api/dashboard/expense-breakdown?from=${from}&to=${to}`),
-          fetch(`/api/dashboard/orders?from=${from}&to=${to}&limit=5`), // Max 5 for preview
-          fetch(`/api/dashboard/activity?limit=3`), // Max 3 for preview
+          fetch(`/api/dashboard/orders?from=${from}&to=${to}&page=${currentPage}&pageSize=10`),
         ]);
 
         const sumResult = await sumRes.json();
         const perfResult = await perfRes.json();
         const expResult = await expRes.json();
         const ordResult = await ordRes.json();
-        const actResult = await actRes.json();
 
         if (sumResult.success) setSummaryData(sumResult.data);
         if (perfResult.success) setChartData(perfResult.data);
         if (expResult.success)
           setExpenseData({ data: expResult.data, total: expResult.total });
-        if (ordResult.success) setOrdersData(ordResult.data);
-        if (actResult.success) setActivityData(actResult.data);
+        if (ordResult.success) {
+          setOrdersData(ordResult.data);
+          setOrdersMeta({
+            totalRecords: ordResult.totalRecords || 0,
+            page: ordResult.page || currentPage,
+            pageSize: ordResult.pageSize || 10,
+            totalPages: ordResult.totalPages || 1,
+          });
+        }
       } catch (err) {
         setError("Network error loading dashboard data");
       } finally {
@@ -75,7 +84,13 @@ export default function DashboardPage() {
     };
 
     fetchDashboardData();
-  }, [from, to]);
+  }, [from, to, currentPage]);
+
+  const handlePageChange = useCallback((newPage: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('page', String(newPage));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, router, pathname]);
 
   // Format the comparison text string dynamically based on the date range
   const getComparisonText = () => {
@@ -101,7 +116,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* KPI Cards Grid (Step 4) */}
+      {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <MetricCard
           title="Total Sales"
@@ -123,7 +138,7 @@ export default function DashboardPage() {
           comparisonText={getComparisonText()}
         />
         <MetricCard
-          title="Gross Profit"
+          title="Net Profit"
           value={summaryData?.grossProfit.value || 0}
           changePercentage={summaryData?.grossProfit.changePercentage}
           trend={summaryData?.grossProfit.trend}
@@ -142,7 +157,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Charts Grid (Step 5) */}
+      {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <div className="lg:col-span-2">
           <BusinessPerformanceChart data={chartData} isLoading={loading} />
@@ -155,6 +170,31 @@ export default function DashboardPage() {
           />
         </div>
       </div>
+
+      {/* Orders Table */}
+      <div className="mb-6">
+        <OrdersTable
+          data={ordersData}
+          totalRecords={ordersMeta.totalRecords}
+          page={ordersMeta.page}
+          pageSize={ordersMeta.pageSize}
+          totalPages={ordersMeta.totalPages}
+          isLoading={loading}
+          onPageChange={handlePageChange}
+        />
+      </div>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={
+      <div className="p-8 text-center text-[var(--color-brand-muted)]">
+        Loading Dashboard...
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   );
 }

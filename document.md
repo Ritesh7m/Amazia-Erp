@@ -224,7 +224,7 @@ The current hardcoded material-cost rate is:
 **Formula**
 
 ```text
-Material Cost = Total Quantity × multiplyer50
+Material Cost = Total Quantity × multiplyer
 ```
 
 Example

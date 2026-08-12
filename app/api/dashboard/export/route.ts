@@ -21,8 +21,10 @@ export async function GET(request: Request) {
       'Sales (INR)',
       'Material Cost (INR)',
       'Duty Cost (INR)',
-      'Book Expenses (INR)',
-      'Net Profit (INR)'
+      'Etsy Expenses (INR)',
+      'Total Expense (INR)',
+      'Net Profit (INR)',
+      'Margin (%)'
     ];
 
     // 2. Map data to CSV rows
@@ -37,8 +39,10 @@ export async function GET(request: Request) {
         order.sales.toFixed(2),
         order.materialCost.toFixed(2),
         order.dutyCost.toFixed(2),
-        order.bookExpense.toFixed(2),
-        order.estimatedProfitBeforeShipping.toFixed(2)
+        (order.totalExpense - order.materialCost - order.dutyCost).toFixed(2),
+        order.totalExpense.toFixed(2),
+        order.estimatedProfitBeforeShipping.toFixed(2),
+        order.margin.toFixed(1)
       ];
       csvRows.push(row.join(','));
     }

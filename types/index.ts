@@ -42,3 +42,13 @@ export interface EtsyRecord {
   net_amt: number;
   created_at?: Date;
 }
+
+export interface EtsyExpenseRecord {
+  order_no: string;
+  expense_type: string;
+  expense_amount: number;
+  source_transaction_type: string;
+  source_description: string;
+  listing_id: string | null;
+  import_reference: string;
+}

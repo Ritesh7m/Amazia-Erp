@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTotalSales, getFedExExpenses, getMaterialExpenses } from '@/lib/dashboard/dashboardQueries';
+import { getTotalSales, getFedExExpenses, getMaterialExpenses, getEtsyExpenses } from '@/lib/dashboard/dashboardQueries';
 import { DashboardSummaryResponse, KPIData } from '@/lib/dashboard/dashboardTypes';
 
 export const dynamic = 'force-dynamic';
@@ -67,22 +67,24 @@ export async function GET(req: NextRequest): Promise<NextResponse<DashboardSumma
     const prevFrom = prevFromDate.toISOString().split('T')[0];
     const prevTo = prevToDate.toISOString().split('T')[0];
 
-    // 2. Fetch data for CURRENT period
-    const [currentSales, currentFedEx, currentMaterial] = await Promise.all([
+    // 2. Fetch data for CURRENT period (now includes Etsy expenses)
+    const [currentSales, currentFedEx, currentMaterial, currentEtsy] = await Promise.all([
       getTotalSales(from, to),
       getFedExExpenses(from, to),
-      getMaterialExpenses(from, to)
+      getMaterialExpenses(from, to),
+      getEtsyExpenses(from, to),
     ]);
-    const currentExpenses = currentFedEx + currentMaterial;
+    const currentExpenses = currentFedEx + currentMaterial + currentEtsy;
     const currentProfit = currentSales - currentExpenses;
 
     // 3. Fetch data for PREVIOUS period
-    const [prevSales, prevFedEx, prevMaterial] = await Promise.all([
+    const [prevSales, prevFedEx, prevMaterial, prevEtsy] = await Promise.all([
       getTotalSales(prevFrom, prevTo),
       getFedExExpenses(prevFrom, prevTo),
-      getMaterialExpenses(prevFrom, prevTo)
+      getMaterialExpenses(prevFrom, prevTo),
+      getEtsyExpenses(prevFrom, prevTo),
     ]);
-    const prevExpenses = prevFedEx + prevMaterial;
+    const prevExpenses = prevFedEx + prevMaterial + prevEtsy;
     const prevProfit = prevSales - prevExpenses;
 
     // 4. Calculate KPIs
@@ -97,6 +99,6 @@ export async function GET(req: NextRequest): Promise<NextResponse<DashboardSumma
 
   } catch (error) {
     console.error('[Dashboard API] Failed to fetch summary data:', error);
-    return NextResponse.json({ success: false, error: 'Failed to process dashboard summary' }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Unable to load dashboard data.' }, { status: 500 });
   }
 }

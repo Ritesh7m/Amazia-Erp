@@ -1,65 +1,73 @@
+// instrumentation.ts
+// This file runs once when the Next.js server starts.
+// It initializes the DuckDB database and schedules background cron jobs.
+
+declare global {
+  var __cronSchedulerInitialized: boolean | undefined;
+}
+
 export async function register() {
-  // Only run on the Node.js runtime (not Edge or browser)
-  if (process.env.NEXT_RUNTIME !== "nodejs") {
+  // Only run on the Node.js runtime (not Edge)
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  try {
+    // 1. Initialize DuckDB schema (safe — getDbInstance uses globalThis singleton)
+    const { initializeDatabase } = await import("@/database");
+    await initializeDatabase();
+    console.log("[System] DuckDB initialized successfully.");
+  } catch (error) {
+    console.error("[System] Failed to initialize DuckDB:", error);
+    // Don't throw — let the app start even if DB init fails,
+    // individual API routes will fail gracefully.
     return;
   }
 
-  // Initialize DuckDB
-  try {
-    const { initializeDatabase } = await import("./database/index");
-    await initializeDatabase();
-    console.log("[Amazia ERP] DuckDB Database initialized successfully.");
-  } catch (error) {
-    console.error("[Amazia ERP] Failed to initialize DuckDB:", error);
+  // 2. Guard against duplicate cron registration on HMR (Turbopack hot reload)
+  if (globalThis.__cronSchedulerInitialized) {
+    console.log("[System] Cron scheduler already initialized, skipping duplicate registration.");
+    return;
   }
+  globalThis.__cronSchedulerInitialized = true;
 
-  // Initialize Cron Scheduler
   try {
-    const cron = await import("node-cron");
-    const { runInventorySync } = await import("./services/inventorySync");
-    const { runBackupWorkflow } = await import("./lib/backup/backupService");
+    // 3. Schedule background inventory sync (every 6 hours) for testing use 2 min "*/2 * * * *"
+    const cron = (await import("node-cron")).default;
+    const { runInventorySync } = await import("@/services/inventorySync");
 
-    console.log("[System] Internal Cron Scheduler Initialized.");
+    cron.schedule(
+      "0 */6 * * *",
+      async () => {
+        console.log(`[Scheduler] Running inventory sync at ${new Date().toISOString()}`);
+        try {
+          await runInventorySync();
+          console.log("[Scheduler] Inventory sync completed.");
+        } catch (err) {
+          console.error("[Scheduler] Inventory sync failed:", err);
+        }
+      },
+      { timezone: "Asia/Kolkata" }
+    );
 
-    // Inventory Sync: Runs every 6 hours "0 */6 * * *"
-    cron.default.schedule("0 */6 * * *", async () => { 
-      console.log("-----------------------------------");
-      console.log("[Cron]  Automatic Trigger Activated!");
-
-      try {
-        await runInventorySync();
-        console.log("[Cron]  Automatic Inventory Sync Completed.");
-      } catch (error) {
-        console.error("[Cron]  Automatic Sync Failed:", error);
-      }
-    });
-
-    // Daily Backup: Runs every day at 11:00 AM "0 11 * * *"
-    cron.default.schedule("0 11 * * *", async () => { 
-      console.log("-----------------------------------");
-      console.log("[Cron]  Daily Backup Trigger Activated!");
-
-      try {
-        await runBackupWorkflow();
-        console.log("[Cron]  Daily Backup Completed.");
-      } catch (error) {
-        console.error("[Cron]  Daily Backup Failed:", error);
-      }
-    }, {
-      timezone: process.env.TIMEZONE || "Asia/Kolkata"
-    });
-
-    // Uncomment this if you want to run once immediately on server startup.
-    /*
-    console.log("[System]  Running initial inventory sync...");
+    // 4. Schedule database backups (daily at 2 AM)
     try {
-      await runInventorySync();
-      console.log("[System]  Initial inventory sync completed.");
-    } catch (error) {
-      console.error("[System]  Initial inventory sync failed:", error);
+      const { runBackupWorkflow } = await import("@/lib/backup/backupService");
+      const { backupConfig } = await import("@/lib/backup/config");
+
+      cron.schedule(backupConfig.rules.cronSchedule, async () => {
+        console.log("[Scheduler] Running backup workflow...");
+        try {
+          await runBackupWorkflow();
+        } catch (err) {
+          console.error("[Scheduler] Backup workflow failed:", err);
+        }
+      });
+    } catch (err) {
+      // Backup module is optional — don't crash if it fails
+      console.warn("[System] Backup scheduler not available:", err);
     }
-    */
+
+    console.log("[System] All cron schedulers registered successfully.");
   } catch (error) {
-    console.error("[System] Failed to initialize cron scheduler:", error);
+    console.error("[System] Failed to set up cron schedulers:", error);
   }
 }

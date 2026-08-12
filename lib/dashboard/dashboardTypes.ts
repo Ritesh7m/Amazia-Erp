@@ -40,14 +40,31 @@ export interface ExpenseBreakdownPoint {
   percentage: number;
 }
 
+export interface ExpenseBreakdown {
+  materialCost: number;
+  fedexDutyTransportation: number;
+  listingExpense: number;
+  tds: number;
+  tcs: number;
+  transactionFee: number;
+  processingFee: number;
+  salesTax: number;
+  regulatoryFee: number;
+  otherEtsyExpense: number;
+  totalExpense: number;
+}
+
 export interface OrderData {
   orderNo: string;
   saleDate: string;
   sales: number;
   materialCost: number;
-  dutyCost: number; 
-  estimatedProfitBeforeShipping: number; 
+  dutyCost: number;
+  totalExpense: number;
+  estimatedProfitBeforeShipping: number;
+  margin: number;
   status: 'Profitable' | 'Loss' | 'Neutral';
+  expenseBreakdown: ExpenseBreakdown;
 }
 
 export interface ActivityData {

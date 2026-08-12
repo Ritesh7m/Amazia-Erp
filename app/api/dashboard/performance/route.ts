@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getMonthlySales, getMonthlyFedEx, getMonthlyMaterials } from '@/lib/dashboard/dashboardQueries';
+import { getMonthlySales, getMonthlyFedEx, getMonthlyMaterials, getMonthlyEtsyExpenses } from '@/lib/dashboard/dashboardQueries';
 
 // Formats '2026-06' into 'Jun 2026'
 const formatMonth = (yyyyMm: string) => {
@@ -39,9 +39,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'Missing date range' }, { status: 400 });
     }
 
-    const monthlySales = await getMonthlySales(from, to);
-    const monthlyFedEx = await getMonthlyFedEx(from, to);
-    const monthlyMaterials = await getMonthlyMaterials(from, to);
+    const [monthlySales, monthlyFedEx, monthlyMaterials, monthlyEtsy] = await Promise.all([
+      getMonthlySales(from, to),
+      getMonthlyFedEx(from, to),
+      getMonthlyMaterials(from, to),
+      getMonthlyEtsyExpenses(from, to),
+    ]);
 
     // Get a continuous sequence of months regardless of whether data exists
     const allMonths = generateMonthRange(from, to);
@@ -51,13 +54,16 @@ export async function GET(request: Request) {
       const salesItem = monthlySales.find(s => s.month === month);
       const fedexItem = monthlyFedEx.find(f => f.month === month);
       const materialItem = monthlyMaterials.find(m => m.month === month);
+      const etsyItem = monthlyEtsy.find(e => e.month === month);
 
       // Default to 0 if the item doesn't exist
       const salesAmount = salesItem?.total || 0;
       const dutyCost = fedexItem?.total || 0;
       const materialCost = materialItem?.total || 0;
+      const etsyExpenses = etsyItem?.total || 0;
       
-      const expenses = dutyCost + materialCost;
+      // Updated: expenses now include Etsy expenses
+      const expenses = dutyCost + materialCost + etsyExpenses;
       const profit = salesAmount - expenses;
       const margin = salesAmount > 0 ? ((profit / salesAmount) * 100).toFixed(1) : 0;
 
@@ -66,7 +72,8 @@ export async function GET(request: Request) {
         sales: salesAmount,
         expenses: expenses,
         materialCost: materialCost, 
-        dutyCost: dutyCost,         
+        dutyCost: dutyCost,
+        etsyExpenses: etsyExpenses,
         profit: profit,
         margin: margin
       };
