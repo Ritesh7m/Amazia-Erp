@@ -1,99 +1,120 @@
 import csv from 'csv-parser';
 import { Readable } from 'stream';
-import { EtsyRecord, EtsyExpenseRecord } from '@/types';
+import { EtsyTransactionRecord } from '@/types';
 import { 
   normalizeAmount, normalizeDate, extractEtsyOrderNumber,
-  extractEtsyListingId, classifyEtsyExpense 
+  extractEtsyListingId 
 } from '@/utils/normalization';
-import { ETSY_EXPENSE_TYPES } from '@/config/appConfig';
+import { classifyEtsyTransaction } from '@/utils/financial-classifier';
+import crypto from 'crypto';
 
 export interface EtsyParseResult {
-  saleRecords: EtsyRecord[];
-  expenseRecords: EtsyExpenseRecord[];
+  transactionRecords: EtsyTransactionRecord[];
 }
 
+/**
+ * Searches data fields matching possibleKeys in strict priority order.
+ * Ignores empty strings and '--' dash placeholders.
+ */
 function getCsvField(data: Record<string, any>, possibleKeys: string[]): string {
-  const normKeys = possibleKeys.map(k => k.toLowerCase().replace(/[^a-z0-9]/g, ''));
-  for (const [key, val] of Object.entries(data)) {
+  const dataMap = new Map<string, any>();
+  for (const [k, v] of Object.entries(data)) {
+    dataMap.set(k.toLowerCase().replace(/[^a-z0-9]/g, ''), v);
+  }
+
+  for (const key of possibleKeys) {
     const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (normKeys.includes(cleanKey)) {
-      return val !== undefined && val !== null ? String(val).trim() : '';
+    if (dataMap.has(cleanKey)) {
+      const val = dataMap.get(cleanKey);
+      if (val !== undefined && val !== null) {
+        const strVal = String(val).trim();
+        if (strVal !== '' && strVal !== '--') {
+          return strVal;
+        }
+      }
     }
   }
   return '';
 }
 
-export const parseEtsyCsv = async (buffer: Buffer, importReference: string): Promise<EtsyParseResult> => {
+function generateTransactionHash(data: string): string {
+  return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+export const parseEtsyCsv = async (buffer: Buffer): Promise<EtsyParseResult> => {
   return new Promise((resolve, reject) => {
-    const saleRecords: EtsyRecord[] = [];
-    const expenseRecords: EtsyExpenseRecord[] = [];
+    const transactionRecords: EtsyTransactionRecord[] = [];
     const stream = Readable.from(buffer);
+    const hashOccurrence = new Map<string, number>();
+    let rowNumber = 0;
 
     stream
       .pipe(csv({
         mapHeaders: ({ header }) => header.trim()
       }))
       .on('data', (data) => {
+        rowNumber++;
         const type = getCsvField(data, ['Type', 'Transaction Type', 'Kind']);
         const title = getCsvField(data, ['Title', 'Description', 'Details']);
         const info = getCsvField(data, ['Info', 'Details', 'Notes']);
         const dateRaw = getCsvField(data, ['Date', 'Transaction Date', 'Posted Date']);
-        const netRaw = getCsvField(data, ['Net', 'Amount', 'Net Amount', 'Fees & Taxes', 'Net (INR)', 'Net (USD)']);
+
+        const feeRaw = getCsvField(data, ['Fees & Taxes', 'Fees & Taxes (INR)', 'Fees & Taxes (USD)', 'Fees', 'Fee']);
+        const netRaw = getCsvField(data, ['Net', 'Net Amount', 'Net (INR)', 'Net (USD)']);
+        const amountRaw = getCsvField(data, ['Amount', 'Gross', 'Gross Amount']);
+        const currency = getCsvField(data, ['Currency', 'Curr']) || 'INR';
+        const taxDetails = getCsvField(data, ['Tax Details', 'Tax']);
 
         if (!type && !title) return;
 
         const normalizedDate = normalizeDate(dateRaw) || '';
-        const rawAmount = normalizeAmount(netRaw);
-        const lowerType = type.toLowerCase();
-        const lowerTitle = title.toLowerCase();
+        const parsedFeeAmount = normalizeAmount(feeRaw);
+        const parsedNetAmount = normalizeAmount(netRaw);
+        const parsedAmount = normalizeAmount(amountRaw);
 
-        // ─── SALE ROWS ─────────────────────────────────────────────────
-        // Payment for order or type 'Sale' with positive sales amount
-        if (lowerType === 'sale' || (lowerTitle.includes('payment for order') && rawAmount > 0)) {
-          const orderNo = extractEtsyOrderNumber(title) || extractEtsyOrderNumber(info) || '';
+        const orderNo = extractEtsyOrderNumber(title) || extractEtsyOrderNumber(info) || '';
+        
+        const { scope, category } = classifyEtsyTransaction(type, title, info, !!orderNo);
 
-          saleRecords.push({
-            order_no: orderNo,
-            date: normalizedDate,
-            type: 'Sale',
-            net_amt: rawAmount,
-          });
-          return;
-        }
-
-        // ─── EXPENSE ROWS ──────────────────────────────────────────────
-        // All fees, taxes, refunds, listing costs, or negative amount transactions
-        const isExpenseType = ['fee', 'tax', 'refund', 'listing', 'transaction', 'shipping', 'regulatory', 'processing'].some(t => lowerType.includes(t));
-        const isExpenseTitle = ['fee', 'tax', 'tds', 'tcs', 'regulatory', 'processing', 'transaction', 'listing'].some(t => lowerTitle.includes(t));
-
-        if (isExpenseType || isExpenseTitle || rawAmount < 0) {
-          const expenseType = classifyEtsyExpense(type, title, info);
-          
-          // Extract order number (e.g., "TDS for Order #4103047120")
-          const orderNo = extractEtsyOrderNumber(title) || extractEtsyOrderNumber(info) || '';
-          
-          // Extract listing ID for listing fees
-          const listingId = (expenseType === ETSY_EXPENSE_TYPES.LISTING_EXPENSE || lowerTitle.includes('listing'))
+        const listingId = (scope === 'ETSY' || title.toLowerCase().includes('listing'))
             ? (extractEtsyListingId(title) || extractEtsyListingId(info))
             : null;
 
-          // Etsy negative amounts (e.g., ₹-21) become positive expense amounts (₹21)
-          const expenseAmount = Math.abs(rawAmount);
-
-          if (expenseAmount > 0) {
-            expenseRecords.push({
-              order_no: orderNo,
-              expense_type: expenseType,
-              expense_amount: expenseAmount,
-              source_transaction_type: type || 'Expense',
-              source_description: `${title}${info ? ' | ' + info : ''}`.substring(0, 500),
-              listing_id: listingId,
-              import_reference: importReference,
-            });
-          }
-        }
+        const normType = type.trim();
+        const normTitle = title.trim();
+        const normInfo = info.trim();
+        const normCurrency = currency.trim().toUpperCase();
+        const normTaxDetails = taxDetails.trim();
+        
+        // Transaction Fingerprint for deduplication
+        const transactionHashData = `${normalizedDate}|${normType}|${normTitle}|${normInfo}|${normCurrency}|${parsedAmount}|${parsedFeeAmount}|${parsedNetAmount}|${normTaxDetails}`;
+        const baseTransactionFingerprint = generateTransactionHash(transactionHashData);
+        
+        const occurrenceNo = (hashOccurrence.get(baseTransactionFingerprint) || 0) + 1;
+        hashOccurrence.set(baseTransactionFingerprint, occurrenceNo);
+        
+        const transactionFingerprint = generateTransactionHash(`${baseTransactionFingerprint}|${occurrenceNo}`);
+        
+        transactionRecords.push({
+          transaction_date: normalizedDate,
+          type: normType,
+          title: normTitle,
+          info: normInfo,
+          currency: normCurrency,
+          amount: parsedAmount,
+          fees_taxes: parsedFeeAmount,
+          net_amount: parsedNetAmount,
+          tax_details: normTaxDetails,
+          order_no: orderNo,
+          listing_id: listingId,
+          transaction_scope: scope,
+          transaction_category: category,
+          transaction_fingerprint: transactionFingerprint,
+          occurrence_no: occurrenceNo,
+          source_row_number: rowNumber
+        });
       })
-      .on('end', () => resolve({ saleRecords, expenseRecords }))
+      .on('end', () => resolve({ transactionRecords }))
       .on('error', (error) => reject(error));
   });
 };

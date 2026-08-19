@@ -1,52 +1,122 @@
 import { NextResponse } from 'next/server';
-import { fetchQuery, executePreparedStatement, getConnection } from '@/database'; // Adjust path if needed
+import { fetchQuery, executePreparedStatement, getConnection } from '@/database';
+import { shipmentApi } from '@/services/shipmentApi';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
   try {
-    // 1. Get all unique orders currently in your Etsy statement
+    // 1. Read distinct order numbers from etsy_statement
     const etsyOrders = await fetchQuery<{ order_no: string }>(`
-      SELECT DISTINCT CAST(order_no AS VARCHAR) as order_no FROM etsy_statement
+      SELECT DISTINCT CAST(order_no AS VARCHAR) as order_no 
+      FROM etsy_statement
+      WHERE order_no IS NOT NULL AND order_no != ''
     `);
 
-    if (etsyOrders.length === 0) {
-      return NextResponse.json({ success: true, message: 'No orders found to sync.' });
+    if (!etsyOrders || etsyOrders.length === 0) {
+      return NextResponse.json({
+        success: true,
+        totalOrders: 0,
+        mappedOrders: 0,
+        newMappings: 0,
+        existingMappings: 0,
+        unmappedOrders: 0,
+        failedOrders: 0,
+        errors: [],
+        message: 'No orders found in etsy_statement to sync.',
+      });
     }
 
     const conn = await getConnection();
-    // Using INSERT OR IGNORE so we don't create duplicates if we run this twice
-    const insertQuery = `INSERT OR IGNORE INTO order_awb_mapping (order_no, awb_number) VALUES (?, ?)`;
-    let mappedCount = 0;
+    
+    // Ensure order_awb_mapping table exists
+    await conn.run(`
+      CREATE TABLE IF NOT EXISTS order_awb_mapping (
+        order_no VARCHAR,
+        awb_number VARCHAR,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (order_no, awb_number)
+      )
+    `);
 
-    // 2. Loop through every order and ask the Dummy API for its AWBs
+    const totalOrders = etsyOrders.length;
+    let mappedOrders = 0;
+    let newMappings = 0;
+    let existingMappings = 0;
+    let unmappedOrders = 0;
+    let failedOrders = 0;
+    const errors: string[] = [];
+
+    const insertQuery = `INSERT INTO order_awb_mapping (order_no, awb_number, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)`;
+
+    // Process orders sequentially so logs are clear and per-request timeouts are isolated
     for (const order of etsyOrders) {
+      const orderNo = order.order_no;
+
       try {
-        // Change the domain/port if you are not running on localhost:3000
-        const res = await fetch(`http://localhost:3000/api/shipments/orders/${order.order_no}`);
-        
-        if (!res.ok) continue;
+        const result = await shipmentApi.getAwbsByOrder(orderNo);
 
-        const json = await res.json();
-        const awbs = json.data?.awbNumbers || [];
-
-        // 3. Save the exact relationship into DuckDB
-        for (const awb of awbs) {
-          await executePreparedStatement(conn, insertQuery, [order.order_no, awb]);
-          mappedCount++;
+        if (!result.success) {
+          failedOrders++;
+          errors.push(result.message || `Order ${orderNo}: Failed to fetch AWBs`);
+          continue;
         }
-      } catch (err) {
-        console.error(`Failed to sync order ${order.order_no}:`, err);
+
+        const awbNumbers = result.data?.awbNumbers || [];
+
+        if (awbNumbers.length === 0) {
+          unmappedOrders++;
+          continue;
+        }
+
+        mappedOrders++;
+
+        for (const awb of awbNumbers) {
+          if (!awb) continue;
+
+          // Check if mapping already exists
+          const existing = await fetchQuery<{ count: number }>(
+            `SELECT COUNT(*) as count FROM order_awb_mapping WHERE order_no = ? AND awb_number = ?`,
+            [orderNo, awb]
+          );
+
+          if (existing && existing[0] && Number(existing[0].count) > 0) {
+            existingMappings++;
+          } else {
+            await executePreparedStatement(conn, insertQuery, [orderNo, awb]);
+            newMappings++;
+          }
+        }
+      } catch (err: any) {
+        failedOrders++;
+        console.error(`Failed to sync order ${orderNo}:`, err);
+        errors.push(`Order ${orderNo}: ${err?.message || 'Unknown error'}`);
       }
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      message: `Successfully mapped ${mappedCount} AWB connections to orders in the database.` 
+    return NextResponse.json({
+      success: failedOrders === 0,
+      totalOrders,
+      mappedOrders,
+      newMappings,
+      existingMappings,
+      unmappedOrders,
+      failedOrders,
+      errors,
     });
-
-  } catch (error) {
-    console.error('Sync Error:', error);
-    return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });
+  } catch (error: any) {
+    console.error('Shipment Sync Endpoint Error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        message: error?.message || 'Shipment service unavailable',
+      },
+      { status: 500 }
+    );
   }
+}
+
+// Support GET for status check or manual trigger if needed
+export async function GET() {
+  return POST();
 }

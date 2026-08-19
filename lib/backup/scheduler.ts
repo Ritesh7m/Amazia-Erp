@@ -14,5 +14,7 @@ console.log('=========================================');
 cron.schedule(backupConfig.rules.cronSchedule, async () => {
   console.log('[Backup Scheduler] Cron schedule triggered. Initiating backup...');
   await runBackupWorkflow();
+}, {
+  timezone: 'Asia/Kolkata'
 });
 

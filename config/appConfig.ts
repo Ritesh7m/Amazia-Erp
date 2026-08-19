@@ -14,21 +14,21 @@ interface MaterialCostFactors {
 
 const materialCostFactors: MaterialCostFactors = configJson.materialCostFactors;
 
-/**
- * Returns the cost-per-unit for a given material type.
- * Case-insensitive: "cotton", "Cotton", "COTTON" all return the COTTON factor.
- * Any non-Cotton material returns the OTHER factor.
- */
-export function getMaterialCostFactor(materialType: string): number {
+export function getMaterialCostFactor(materialType: string | null | undefined): number | null {
+  if (!materialType || materialType.trim() === '') {
+    return null; // UNASSIGNED
+  }
   const normalized = materialType.trim().toUpperCase();
-  return materialCostFactors[normalized] ?? materialCostFactors['OTHER'] ?? 100;
+  if (normalized === 'COTTON') {
+    return materialCostFactors['COTTON'] ?? 90;
+  }
+  return materialCostFactors['OTHER'] ?? 100;
 }
 
-/**
- * Calculates the total material cost for a given material type and quantity.
- */
-export function getMaterialCost(materialType: string, quantity: number): number {
-  return quantity * getMaterialCostFactor(materialType);
+export function getMaterialCost(materialType: string, quantity: number): number | null {
+  const factor = getMaterialCostFactor(materialType);
+  if (factor === null) return null;
+  return quantity * factor;
 }
 
 /**
@@ -54,29 +54,48 @@ export function getDashboardConfig() {
 // Centralized enum of all recognized Etsy expense categories.
 // Used in parser classification, database storage, and dashboard display.
 
-export const ETSY_EXPENSE_TYPES = {
-  LISTING_EXPENSE: 'LISTING_EXPENSE',
+export const ETSY_TRANSACTION_SCOPES = {
+  SALE: 'SALE',
+  REFUND: 'REFUND',
+  ORDER: 'ORDER',
+  ETSY: 'ETSY',
+  IGNORE: 'IGNORE',
+} as const;
+
+export type EtsyTransactionScope = typeof ETSY_TRANSACTION_SCOPES[keyof typeof ETSY_TRANSACTION_SCOPES];
+
+export const ETSY_TRANSACTION_CATEGORIES = {
+  SALE: 'SALE',
+  REFUND: 'REFUND',
+  DEPOSIT: 'DEPOSIT',
+  LISTING_FEE: 'LISTING_FEE',
+  ETSY_ADS: 'ETSY_ADS',
+  OFFSITE_ADS: 'OFFSITE_ADS',
   TDS: 'TDS',
   TCS: 'TCS',
-  REGULATORY_OPERATING_FEE: 'REGULATORY_OPERATING_FEE',
+  REGULATORY_FEE: 'REGULATORY_FEE',
   TRANSACTION_FEE: 'TRANSACTION_FEE',
   PROCESSING_FEE: 'PROCESSING_FEE',
   SALES_TAX: 'SALES_TAX',
+  BUYER_FEE: 'BUYER_FEE',
+  OTHER_ORDER_EXPENSE: 'OTHER_ORDER_EXPENSE',
   OTHER_ETSY_EXPENSE: 'OTHER_ETSY_EXPENSE',
 } as const;
 
-export type EtsyExpenseType = typeof ETSY_EXPENSE_TYPES[keyof typeof ETSY_EXPENSE_TYPES];
+export type EtsyTransactionCategory = typeof ETSY_TRANSACTION_CATEGORIES[keyof typeof ETSY_TRANSACTION_CATEGORIES];
 
-/**
- * Human-readable labels for each expense type (used in dashboard UI).
- */
-export const ETSY_EXPENSE_LABELS: Record<EtsyExpenseType, string> = {
-  LISTING_EXPENSE: 'Etsy Listing Expense',
+export const ETSY_EXPENSE_LABELS: Record<string, string> = {
+  LISTING_FEE: 'Etsy Listing Expense',
+  ETSY_ADS: 'Etsy Ads',
+  OFFSITE_ADS: 'Offsite Ads',
+  REFUND: 'Refund',
   TDS: 'TDS',
   TCS: 'TCS',
-  REGULATORY_OPERATING_FEE: 'Regulatory Operating Fee',
+  REGULATORY_FEE: 'Regulatory Operating Fee',
   TRANSACTION_FEE: 'Transaction Fee',
   PROCESSING_FEE: 'Processing Fee',
   SALES_TAX: 'Sales Tax',
+  BUYER_FEE: 'Buyer Fee',
+  OTHER_ORDER_EXPENSE: 'Other Order Expense',
   OTHER_ETSY_EXPENSE: 'Other Etsy Expense',
 };

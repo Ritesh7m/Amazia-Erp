@@ -1,5 +1,6 @@
 import { RawSheetRow, InventoryRecord } from '@/types/inventory';
 import { inventoryRowSchema } from '@/utils/inventoryValidation';
+import { getMaxQuantityPerOrder, getMaterialCostFactor } from '@/config/appConfig';
 
 export const processAndAggregateInventory = (
   rawRows: RawSheetRow[]
@@ -27,9 +28,21 @@ export const processAndAggregateInventory = (
       continue;
     }
 
-    // Normalization: Strip everything after "-"
     const normalizedOrderId = row.orderId.split('-')[0].trim();
     const quantity = parseFloat(row.quantity);
+    const materialType = row.materialType.trim();
+
+    if (quantity > getMaxQuantityPerOrder()) {
+      console.warn(`[InventoryProcessor] Skipping invalid quantity ${quantity} for order ${normalizedOrderId}`);
+      skippedCount++;
+      continue;
+    }
+
+    if (getMaterialCostFactor(materialType) === null) {
+      console.warn(`[InventoryProcessor] Skipping order ${normalizedOrderId} due to UNASSIGNED material type '${materialType}'`);
+      skippedCount++;
+      continue;
+    }
 
     // Business Key for Aggregation
     // FIX: We now group strictly by Order ID so quantities merge into one row

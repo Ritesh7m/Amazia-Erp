@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fetchQuery } from '@/database'; 
+import { fetchQuery, getConnection } from '@/database'; 
 import { getAllMaterialCostFactors } from '@/config/appConfig';
 
 function buildMaterialCostExpr(): string {
@@ -15,6 +15,7 @@ function buildMaterialCostExpr(): string {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+
     const query = searchParams.get('q');
 
     if (!query || query.length < 2) {
@@ -25,45 +26,32 @@ export async function GET(request: Request) {
     const costExpr = buildMaterialCostExpr();
 
     const sqlQuery = `
-      WITH awb_order_counts AS (
-        SELECT awb_number, COUNT(DISTINCT order_no) as total_orders_in_awb
-        FROM order_awb_mapping
-        GROUP BY awb_number
-      ),
-      allocated_fedex AS (
-        SELECT 
-          m.order_no,
-          STRING_AGG(DISTINCT m.awb_number, ' | ') as awb_numbers,
-          SUM(f.air_waybill_total_amount / c.total_orders_in_awb) as allocated_duty_cost
-        FROM order_awb_mapping m
-        JOIN fedex_billing f ON m.awb_number = f.awb_number
-        JOIN awb_order_counts c ON m.awb_number = c.awb_number
-        GROUP BY m.order_no
-      ),
-      order_etsy_expenses AS (
-        SELECT order_no, COALESCE(SUM(expense_amount), 0) AS total_etsy_expense
-        FROM etsy_expenses
-        GROUP BY order_no
-      )
       SELECT
-        CAST(e.order_no AS VARCHAR) AS order_no,
-        CAST(e.date AS VARCHAR) AS sale_date,
-        COALESCE(TRY_CAST(REPLACE(CAST(e.net_amt AS VARCHAR), ',', '') AS DOUBLE), 0) AS sales,
-        COALESCE(SUM(${costExpr}), 0) AS material_cost,
-        COALESCE(af.allocated_duty_cost, 0) AS duty_cost,
-        COALESCE(MAX(af.awb_numbers), 'N/A') AS awb_numbers,
-        COALESCE(oex.total_etsy_expense, 0) AS total_etsy_expense
-      FROM etsy_statement e
-      LEFT JOIN inventory_table i ON CAST(i.order_no AS VARCHAR) LIKE CAST(e.order_no AS VARCHAR) || '%'
-      LEFT JOIN allocated_fedex af ON CAST(e.order_no AS VARCHAR) = CAST(af.order_no AS VARCHAR)
-      LEFT JOIN order_etsy_expenses oex ON CAST(e.order_no AS VARCHAR) = CAST(oex.order_no AS VARCHAR)
-      WHERE CAST(e.order_no AS VARCHAR) ILIKE ? 
-         OR CAST(e.order_no AS VARCHAR) IN (
+        CAST(o.order_no AS VARCHAR) AS order_no,
+        CAST(o.sale_date AS VARCHAR) AS sale_date,
+        o.sales,
+        o.material_cost,
+        o.fedex_cost AS duty_cost,
+        o.awb_numbers,
+        o.etsy_listing_expense AS listing_expense,
+        o.tds,
+        o.tcs,
+        o.transaction_fee,
+        o.processing_fee,
+        o.sales_tax,
+        o.regulatory_fee,
+        o.etsy_expenses AS etsy_expenses,
+        o.total_expense,
+        o.profit AS estimatedProfitBeforeShipping,
+        o.profit AS netProfit,
+        o.margin
+      FROM v_order_financials o
+      WHERE CAST(o.order_no AS VARCHAR) ILIKE ? 
+         OR CAST(o.order_no AS VARCHAR) IN (
             SELECT CAST(order_no AS VARCHAR) 
             FROM order_awb_mapping 
-            WHERE awb_number ILIKE ?
+            WHERE CAST(awb_number AS VARCHAR) ILIKE ?
          )
-      GROUP BY e.order_no, e.date, e.net_amt, af.allocated_duty_cost, oex.total_etsy_expense
       LIMIT 6
     `;
 
@@ -71,30 +59,41 @@ export async function GET(request: Request) {
 
     const data = rows.map((row: any) => {
       const sales = Number(row.sales ?? 0);
-      const materialCost = Number(row.material_cost ?? 0);
-      const dutyCost = Number(row.duty_cost ?? 0);
-      const totalEtsyExpense = Number(row.total_etsy_expense ?? 0);
-      const totalExpense = materialCost + dutyCost + totalEtsyExpense;
-      const profit = sales - totalExpense;
+      const profit = Number(row.netProfit ?? 0);
 
       return {
         orderNo: String(row.order_no ?? ''),
         saleDate: String(row.sale_date ?? ''),
         sales,
-        materialCost,
-        dutyCost,
-        totalEtsyExpense,
-        totalExpense,
+        materialCost: Number(row.material_cost ?? 0),
+        dutyCost: Number(row.duty_cost ?? 0),
+        listingExpense: Number(row.listing_expense ?? 0),
+        etsyExpenses: Number(row.etsy_expenses ?? 0),
+        totalExpense: Number(row.total_expense ?? 0),
         awbNumbers: String(row.awb_numbers ?? 'N/A'),
+        estimatedProfitBeforeShipping: profit,
         netProfit: profit,
-        margin: sales > 0 ? Number(((profit / sales) * 100).toFixed(1)) : 0,
+        margin: Number(row.margin ?? 0),
         status: profit > 0 ? 'Profitable' : profit < 0 ? 'Loss' : 'Neutral',
+        expenseBreakdown: {
+          materialCost: Number(row.material_cost ?? 0),
+          fedexDutyTransportation: Number(row.duty_cost ?? 0),
+          listingExpense: Number(row.listing_expense ?? 0),
+          tds: Number(row.tds ?? 0),
+          tcs: Number(row.tcs ?? 0),
+          transactionFee: Number(row.transaction_fee ?? 0),
+          processingFee: Number(row.processing_fee ?? 0),
+          salesTax: Number(row.sales_tax ?? 0),
+          regulatoryFee: Number(row.regulatory_fee ?? 0),
+          etsyExpenses: Number(row.etsy_expenses ?? 0),
+          totalExpense: Number(row.total_expense ?? 0),
+        },
       };
     });
 
     return NextResponse.json({ data });
   } catch (error) {
     console.error('SEARCH API ERROR:', error);
-    return NextResponse.json({ success: false, error: 'Failed to search' }, { status: 500 });
+    return NextResponse.json({ success: false, error: (error as any)?.message || String(error) }, { status: 500 });
   }
 }

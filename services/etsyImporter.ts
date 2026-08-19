@@ -1,12 +1,11 @@
 import type { Connection } from 'duckdb';
 import { parseEtsyCsv } from '@/services/etsyParser';
-import { allocateListingExpenses } from '@/services/listingAllocation';
+import { allocateEtsyLevelExpenses } from '@/services/listingAllocation';
 import { generateFileHash } from '@/utils/crypto';
 import { fetchQuery, executeTransaction, executePreparedStatement, getConnection } from '@/database';
-import { ApiResponse } from '@/types';
+import { ApiResponse, EtsyTransactionRecord } from '@/types';
 import { SUPPORTED_INVOICE_TYPES, HTTP_STATUS } from '@/constants';
-import { etsyRowSchema } from '@/utils/validation';
-import { ETSY_EXPENSE_TYPES } from '@/config/appConfig';
+import { ETSY_TRANSACTION_SCOPES } from '@/config/appConfig';
 
 interface ImportResult {
   status: number;
@@ -22,159 +21,210 @@ export const processEtsyImport = async (
   const fileHash = generateFileHash(fileBuffer);
 
   try {
-    // ─── DUPLICATE FILE CHECK ──────────────────────────────────────
-    const existing = await fetchQuery<{ id: number }>(
-      `SELECT id FROM import_history WHERE file_hash = ?`,
-      [fileHash]
-    );
+    const { transactionRecords } = await parseEtsyCsv(fileBuffer);
 
-    if (existing && existing.length > 0) {
-      return {
-        status: HTTP_STATUS.CONFLICT,
-        data: { success: false, message: 'This file has already been imported.' }
-      };
-    }
-
-    // ─── PARSE: Extract both sale records and expense records ───────
-    const { saleRecords, expenseRecords } = await parseEtsyCsv(fileBuffer, fileHash);
-
-    if (saleRecords.length === 0 && expenseRecords.length === 0) {
+    if (transactionRecords.length === 0) {
       return {
         status: HTTP_STATUS.UNPROCESSABLE_ENTITY,
         data: { success: false, message: 'No valid Etsy records found in the uploaded file.' }
       };
     }
 
-    // ─── VALIDATE SALE RECORDS ─────────────────────────────────────
-    let failedRowCount = 0;
-    for (const record of saleRecords) {
-      const validation = etsyRowSchema.safeParse(record);
-      if (!validation.success) {
-        failedRowCount++;
+    // 1. Idempotency Check
+    const existing = await fetchQuery<any>(
+      `SELECT id, status FROM import_history WHERE file_hash = ?`,
+      [fileHash]
+    );
+
+    let importId: number;
+
+    if (existing && existing.length > 0) {
+      if (existing[0].status === 'SUCCESS') {
+        return {
+          status: HTTP_STATUS.CONFLICT,
+          data: { success: true, message: 'This file has already been successfully imported.' }
+        };
+      } else {
+        // Reuse the existing record if it failed previously
+        importId = existing[0].id;
+        const conn = await getConnection();
+        await executePreparedStatement(conn, `UPDATE import_history SET status = 'PROCESSING' WHERE id = ?`, [importId]);
+        conn.close();
       }
-    }
-
-    // Rollback on any sale validation failure, no partial imports
-    if (failedRowCount > 0) {
-      const processingTime = Date.now() - startTime;
+    } else {
       const conn = await getConnection();
-      const failHistoryQuery = `
+      const importInsertQuery = `
         INSERT INTO import_history (
-          file_name, file_hash, file_size, status, invoice_type,
-          total_rows, imported_rows, failed_rows, processing_time
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          file_name, file_hash, file_size, status, invoice_type, total_rows, imported_rows, failed_rows, processing_time
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
       `;
-      
-      await executePreparedStatement(conn, failHistoryQuery, [
-        fileName, fileHash, fileSize, 'FAILED', SUPPORTED_INVOICE_TYPES.ETSY,
-        saleRecords.length, 0, failedRowCount, processingTime
-      ]);
-
-      return {
-        status: HTTP_STATUS.UNPROCESSABLE_ENTITY,
-        data: {
-          success: false,
-          message: 'Validation failed.',
-          totalRows: saleRecords.length,
-          importedRows: 0,
-          failedRows: failedRowCount,
-          processingTime
-        }
-      };
+      const importRes = await new Promise<any[]>((resolve, reject) => {
+        conn.all(importInsertQuery, 
+          ...[fileName, fileHash, fileSize, 'PROCESSING', SUPPORTED_INVOICE_TYPES.ETSY, transactionRecords.length, 0, 0, 0], 
+          (err: any, rows: any) => err ? reject(err) : resolve(rows || [])
+        );
+      });
+      importId = importRes[0]?.id;
+      conn.close();
     }
 
-    // ─── DATABASE TRANSACTION ──────────────────────────────────────
-    // Upload → Parse → Normalize → Validate → Calculate →
-    // Begin Transaction → Insert Etsy records → Insert Etsy expenses →
-    // Create listing allocations → Commit
-    // Critical failure → ROLLBACK, no partial financial data.
-    
-    const totalRows = saleRecords.length + expenseRecords.length;
+    let resultData: ApiResponse = { success: false, message: '' };
 
     await executeTransaction(async (conn: Connection) => {
-      // 1. Insert sale records into etsy_statement
-      const insertSaleQuery = `
-        INSERT INTO etsy_statement (
-          order_no, date, type, net_amt
-        ) VALUES (?, ?, ?, ?)
-      `;
 
-      for (const record of saleRecords) {
-        await executePreparedStatement(conn, insertSaleQuery, [
-          record.order_no, record.date, record.type, record.net_amt
-        ]);
+      // 2. Insert Transactions
+      let insertedCount = 0;
+      const CHUNK_SIZE = 500;
+      const newTransactions: EtsyTransactionRecord[] = [];
+      
+      for (let i = 0; i < transactionRecords.length; i += CHUNK_SIZE) {
+        const chunk = transactionRecords.slice(i, i + CHUNK_SIZE);
+        
+        // Handle Sales
+        const salesChunk = chunk.filter(tx => tx.transaction_category === 'SALE' && tx.order_no);
+        if (salesChunk.length > 0) {
+          const salesPlaceholders = salesChunk.map(() => '(?, ?, ?, ?, ?)').join(',');
+          const salesValues = salesChunk.flatMap(tx => [
+            tx.transaction_fingerprint, tx.order_no, tx.transaction_date, 'Sale', tx.amount
+          ]);
+          
+          const salesInsertQuery = `
+            INSERT INTO etsy_sales (
+              transaction_hash, order_no, sale_date, type, gross_amount
+            ) VALUES ${salesPlaceholders}
+            ON CONFLICT (transaction_hash) DO NOTHING
+            RETURNING transaction_hash
+          `;
+          
+          const insertedSales = await new Promise<any[]>((resolve, reject) => {
+            conn.all(salesInsertQuery, ...salesValues, (err: any, rows: any) => err ? reject(err) : resolve(rows || []));
+          });
+          
+          insertedCount += insertedSales.length;
+          const insertedSalesSet = new Set(insertedSales.map(r => r.transaction_hash));
+          newTransactions.push(...salesChunk.filter(tx => insertedSalesSet.has(tx.transaction_fingerprint)));
+        }
+
+        // Handle Expenses / Refunds
+        const expenseChunk = chunk.filter(tx => tx.transaction_category !== 'SALE');
+        if (expenseChunk.length > 0) {
+          const expensePlaceholders = expenseChunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(',');
+          const expenseValues = expenseChunk.flatMap(tx => [
+            tx.transaction_fingerprint, tx.order_no || null, tx.transaction_date, tx.transaction_category,
+            tx.title, tx.info, tx.currency, tx.amount, tx.fees_taxes, tx.net_amount, tx.tax_details,
+            tx.listing_id, false, importId.toString(), null
+          ]);
+          
+          const expenseInsertQuery = `
+            INSERT INTO etsy_expenses (
+              transaction_hash, order_no, expense_date, expense_type, title, info,
+              currency, amount, fees_taxes, net_amount, tax_details, listing_id, is_allocation, import_reference, source_transaction_hash
+            ) VALUES ${expensePlaceholders}
+            ON CONFLICT (transaction_hash) DO NOTHING
+            RETURNING transaction_hash
+          `;
+          
+          const insertedExpenses = await new Promise<any[]>((resolve, reject) => {
+            conn.all(expenseInsertQuery, ...expenseValues, (err: any, rows: any) => err ? reject(err) : resolve(rows || []));
+          });
+          
+          insertedCount += insertedExpenses.length;
+          const insertedExpenseSet = new Set(insertedExpenses.map(r => r.transaction_hash));
+          newTransactions.push(...expenseChunk.filter(tx => insertedExpenseSet.has(tx.transaction_fingerprint)));
+        }
       }
 
-      // 2. Insert ALL expense records into etsy_expenses
-      //    (Raw listing expenses store listing_id with empty order_no; allocated listing expenses get assigned order_no)
-      const insertExpenseQuery = `
-        INSERT INTO etsy_expenses (
-          order_no, expense_type, expense_amount, 
-          source_transaction_type, source_description, listing_id, import_reference
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT DO NOTHING
-      `;
+      // 3. Allocate Etsy-Level Expenses
+      const newSales = newTransactions.filter(t => t.transaction_category === 'SALE' && t.order_no);
+      const uniqueSaleOrderNos = [...new Set(newSales.map(t => t.order_no))];
 
-      for (const expense of expenseRecords) {
-        await executePreparedStatement(conn, insertExpenseQuery, [
-          expense.order_no,
-          expense.expense_type,
-          expense.expense_amount,
-          expense.source_transaction_type,
-          expense.source_description,
-          expense.listing_id,
-          expense.import_reference,
-        ]);
-      }
-
-      // 3. Run listing allocation logic for eligible orders
-      const saleOrderNos = saleRecords.map(r => r.order_no).filter(o => o.length > 0);
-      const allocationRecords = await allocateListingExpenses(
-        conn, expenseRecords, saleOrderNos, fileHash
+      const { groups, allocations } = await allocateEtsyLevelExpenses(
+        conn, importId, newTransactions, uniqueSaleOrderNos
       );
 
-      // Insert allocated listing expense records
-      for (const alloc of allocationRecords) {
-        await executePreparedStatement(conn, insertExpenseQuery, [
-          alloc.order_no,
-          alloc.expense_type,
-          alloc.expense_amount,
-          alloc.source_transaction_type,
-          alloc.source_description,
-          alloc.listing_id,
-          alloc.import_reference,
-        ]);
-      }
-
-      // 4. Record import history
+      // 4. Update Import Record
       const processingTime = Date.now() - startTime;
-      const historyQuery = `
-        INSERT INTO import_history (
-          file_name, file_hash, file_size, status, invoice_type,
-          total_rows, imported_rows, failed_rows, processing_time
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      const updateImportQuery = `
+        UPDATE import_history 
+        SET status = 'SUCCESS', imported_rows = ?, failed_rows = 0, processing_time = ?
+        WHERE id = ?
       `;
-      
-      await executePreparedStatement(conn, historyQuery, [
-        fileName, fileHash, fileSize, 'SUCCESS', SUPPORTED_INVOICE_TYPES.ETSY,
-        totalRows, totalRows, 0, processingTime
+      await executePreparedStatement(conn, updateImportQuery, [
+        insertedCount, processingTime, importId
       ]);
+      
+      // 5. Update Sync Metadata
+      const syncMetaQuery = `
+        UPDATE sync_metadata 
+        SET last_processed_row = ?, last_sync_at = CURRENT_TIMESTAMP
+        WHERE sync_name = 'etsy_statement'
+      `;
+      await executePreparedStatement(conn, syncMetaQuery, [insertedCount]);
+      const grossSales = transactionRecords.filter(t => t.transaction_category === 'SALE').reduce((sum, t) => sum + (t.amount || 0), 0);
+      const refunds = transactionRecords.filter(t => t.transaction_category === 'REFUND').reduce((sum, t) => sum + -(t.net_amount || 0), 0);
+      const netSales = grossSales - refunds;
+      
+      const listingFeeCharges = transactionRecords.filter(t => t.transaction_category === 'LISTING_FEE' && (t.net_amount || 0) < 0).reduce((sum, t) => sum + -(t.net_amount || 0), 0);
+      const listingFeeCredits = transactionRecords.filter(t => t.transaction_category === 'LISTING_FEE' && (t.net_amount || 0) > 0).reduce((sum, t) => sum + (t.net_amount || 0), 0);
+      const netListingFees = transactionRecords.filter(t => t.transaction_category === 'LISTING_FEE').reduce((sum, t) => sum + -(t.net_amount || 0), 0);
+      const etsyAds = transactionRecords.filter(t => t.transaction_category === 'ETSY_ADS').reduce((sum, t) => sum + -(t.net_amount || 0), 0);
+      
+      const etsyLevelPool = netListingFees + etsyAds;
+      const offsiteAds = transactionRecords.filter(t => t.transaction_category === 'OFFSITE_ADS').reduce((sum, t) => sum + -(t.net_amount || 0), 0);
+      const orderLevelFees = transactionRecords.filter(t => ['TRANSACTION_FEE', 'PROCESSING_FEE', 'REGULATORY_FEE', 'BUYER_FEE', 'OTHER_ORDER_EXPENSE', 'SHARE_AND_SAVE_REFUND'].includes(t.transaction_category)).reduce((sum, t) => sum + -(t.net_amount || 0), 0);
+      const orderLevelTaxes = transactionRecords.filter(t => ['TCS', 'TDS', 'SALES_TAX'].includes(t.transaction_category)).reduce((sum, t) => sum + -(t.net_amount || 0), 0);
+      
+      const etsyOperatingExpenses = netListingFees + etsyAds + offsiteAds + orderLevelFees + orderLevelTaxes;
+      const etsyOnlyProfit = netSales - etsyOperatingExpenses;
+
+      resultData = {
+        success: true,
+        message: insertedCount === 0 ? "No new records imported. Existing records were skipped." : "Import completed successfully.",
+        totalRows: transactionRecords.length,
+        importedRows: insertedCount,
+        newSales: newSales.length,
+        newExpenses: newTransactions.length - newSales.length,
+        duplicateSales: transactionRecords.filter(t => t.transaction_category === 'SALE').length - newSales.length,
+        duplicateExpenses: (transactionRecords.length - transactionRecords.filter(t => t.transaction_category === 'SALE').length) - (newTransactions.length - newSales.length),
+        newListingTransactions: newTransactions.filter(t => t.transaction_category === 'LISTING_FEE').length,
+        duplicateListingTransactions: transactionRecords.filter(t => t.transaction_category === 'LISTING_FEE').length - newTransactions.filter(t => t.transaction_category === 'LISTING_FEE').length,
+        newListingAllocations: allocations,
+        processingTime,
+        reconciliation: {
+          grossSales,
+          refunds,
+          netSales,
+          listingFeeCharges,
+          listingFeeCredits,
+          netListingFees,
+          etsyAds,
+          etsyLevelPool,
+          offsiteAds,
+          orderLevelFees,
+          orderLevelTaxes,
+          etsyOperatingExpenses,
+          etsyOnlyProfit
+        }
+      };
     });
 
     return {
       status: HTTP_STATUS.OK,
-      data: {
-        success: true, 
-        message: `Import completed successfully. ${saleRecords.length} sales and ${expenseRecords.length} expenses processed.`,
-        totalRows: totalRows, 
-        importedRows: totalRows,
-        failedRows: 0, 
-        processingTime: Date.now() - startTime
-      }
+      data: resultData
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[Etsy Importer] Error during import:', error);
+    
+    // Attempt to mark as FAILED
+    try {
+      const conn = await getConnection();
+      await executePreparedStatement(conn, `UPDATE import_history SET status = 'FAILED' WHERE file_hash = ?`, [fileHash]);
+      conn.close();
+    } catch (e) {
+      console.error('[Etsy Importer] Could not update failure status:', e);
+    }
+
     return {
       status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
       data: { success: false, message: 'Database Error. Transaction rolled back.' }

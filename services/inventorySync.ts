@@ -13,7 +13,7 @@ export const runInventorySync = async () => {
   try {
     // 1. Read Metadata
     const metadata = await fetchQuery<{ last_processed_row: number }>(
-      `SELECT last_processed_row FROM sync_metadata WHERE sync_name = 'inventory'`
+      `SELECT last_processed_row FROM sync_metadata WHERE sync_name = 'google_sheets_inventory'`
     );
     const lastProcessedRow = metadata[0]?.last_processed_row || 1;
     console.log(`[Scheduler] Resuming from row: ${lastProcessedRow}`);
@@ -39,7 +39,7 @@ export const runInventorySync = async () => {
     if (validRecords.length === 0) {
       const conn = await getConnection();
       await executePreparedStatement(conn, 
-        `UPDATE sync_metadata SET last_processed_row = ?, last_sync_at = now() WHERE sync_name = 'inventory'`,
+        `UPDATE sync_metadata SET last_processed_row = ?, last_sync_at = now() WHERE sync_name = 'google_sheets_inventory'`,
         [maxRowIndex]
       );
       return { success: true, message: 'Processed rows, but all were skipped.' };
@@ -47,12 +47,12 @@ export const runInventorySync = async () => {
 // 4. Database Transaction (Bulk UPSERT via Chunked SQL)
     console.log(`[Scheduler] 💾 Blasting ${validRecords.length} records into DuckDB (Multi-row Chunks)...`);
     const transactionStartTime = Date.now();
+    let completedCount = 0;
     
     await executeTransaction(async (conn: Connection) => {
       
       // CHUNK OPTIMIZATION: Send 1000 rows in a single SQL string!
       const CHUNK_SIZE = 1000;
-      let completedCount = 0;
 
       for (let i = 0; i < validRecords.length; i += CHUNK_SIZE) {
         const chunk = validRecords.slice(i, i + CHUNK_SIZE);
@@ -82,14 +82,13 @@ export const runInventorySync = async () => {
         await executePreparedStatement(conn, upsertQuery, params);
         
         completedCount += chunk.length;
-        console.log(`[Scheduler]   ... successfully inserted ${completedCount} / ${validRecords.length} records`);
       }
 
       // Update Metadata
       const updateMetadataQuery = `
         UPDATE sync_metadata 
         SET last_processed_row = ?, last_sync_at = now() 
-        WHERE sync_name = 'inventory'
+        WHERE sync_name = 'google_sheets_inventory'
       `;
       await executePreparedStatement(conn, updateMetadataQuery, [maxRowIndex]);
     });
@@ -99,18 +98,26 @@ export const runInventorySync = async () => {
 
     // 5. Logging
     console.log('[Scheduler] 🎉 Inventory Sync Successfully Completed!');
-    console.log(`   - Google API Time: ${apiTime}ms`);
-    console.log(`   - Rows Fetched: ${rawRows.length}`);
-    console.log(`   - Rows Skipped (Invalid): ${skippedCount}`);
-    console.log(`   - Rows Aggregated & Saved: ${validRecords.length}`);
-    console.log(`   - DuckDB Insert Time: ${transactionTime}ms`);
-    console.log(`   - Total Processing Time: ${totalTime}ms`);
+    console.log(`   - started_at: ${new Date(startTime).toISOString()}`);
+    console.log(`   - downloaded_rows: ${rawRows.length}`);
+    console.log(`   - aggregated_rows: ${validRecords.length}`);
+    console.log(`   - inserted_rows: ${completedCount}`);
+    console.log(`   - updated_rows: 0`);
+    console.log(`   - skipped_rows: ${skippedCount}`);
+    console.log(`   - failed_rows: 0`);
+    console.log(`   - duration: ${totalTime}ms`);
+    console.log(`   - final status: SUCCESS`);
     console.log('-----------------------------------');
 
     return { success: true, aggregatedRows: validRecords.length, skipped: skippedCount };
 
-  } catch (error) {
-    console.error('[Scheduler]  Sync Failed. Transaction Rolled Back.', error);
+  } catch (error: any) {
+    const totalTime = Date.now() - startTime;
+    console.log('[Scheduler] ❌ Inventory Sync Failed!');
+    console.log(`   - started_at: ${new Date(startTime).toISOString()}`);
+    console.log(`   - duration: ${totalTime}ms`);
+    console.log(`   - final status: FAILED`);
+    console.error('[Scheduler] Sync Failed. Transaction Rolled Back.', error?.message || error);
     throw error;
   }
 };

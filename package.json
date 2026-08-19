@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:reset": "npx tsx services/reset-db.ts",
+    "db:sync-shipments": "npx tsx services/shipmentSync.ts",
+    "db:backup": "npx tsx -e \"import('./lib/backup/backupService').then(m => m.runBackupWorkflow())\""
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

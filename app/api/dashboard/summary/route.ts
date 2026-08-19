@@ -1,48 +1,63 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTotalSales, getFedExExpenses, getMaterialExpenses, getEtsyExpenses } from '@/lib/dashboard/dashboardQueries';
+import { OrderFinancialService } from '@/services/financial/order-financial-service';
 import { DashboardSummaryResponse, KPIData } from '@/lib/dashboard/dashboardTypes';
 
 export const dynamic = 'force-dynamic';
 
 function calculateKPI(current: number, previous: number): KPIData {
-  let changePercentage = 0;
+  let changePercentage: number | null = null;
   
-  if (previous === 0) {
-    changePercentage = current > 0 ? 100 : 0;
-  } else {
+  if (previous !== 0) {
     changePercentage = ((current - previous) / Math.abs(previous)) * 100;
+    changePercentage = Math.round(changePercentage * 10) / 10;
   }
 
-  changePercentage = Math.round(changePercentage * 10) / 10;
-
   let trend: 'up' | 'down' | 'neutral' = 'neutral';
-  if (changePercentage > 0) trend = 'up';
-  if (changePercentage < 0) trend = 'down';
+  if (changePercentage !== null) {
+    if (changePercentage > 0) trend = 'up';
+    if (changePercentage < 0) trend = 'down';
+  }
 
   return {
     value: current,
     previousValue: previous,
-    changePercentage: Math.abs(changePercentage),
+    changePercentage: changePercentage !== null ? Math.abs(changePercentage) : null,
     trend
   };
 }
 
-function calculateMarginKPI(currentProfit: number, currentSales: number, prevProfit: number, prevSales: number): KPIData {
-  const currentMargin = currentSales === 0 ? 0 : (currentProfit / currentSales) * 100;
-  const prevMargin = prevSales === 0 ? 0 : (prevProfit / prevSales) * 100;
+function calculateMarginKPI(currentMargin: number, prevMargin: number): KPIData {
+  if (prevMargin === 0 && currentMargin === 0) {
+     return {
+      value: 0,
+      previousValue: 0,
+      changePercentage: null,
+      trend: 'neutral',
+      isPercentagePoint: true
+    };
+  }
+
+  let diff: number | null = currentMargin - prevMargin;
   
-  const diff = currentMargin - prevMargin;
-  const roundedDiff = Math.round(diff * 10) / 10;
+  // If there was no previous sales/margin, it's basically N/A comparison.
+  if (prevMargin === 0) {
+    diff = null;
+  }
+
+  const roundedDiff = diff !== null ? Math.round(diff * 10) / 10 : null;
 
   let trend: 'up' | 'down' | 'neutral' = 'neutral';
-  if (roundedDiff > 0) trend = 'up';
-  if (roundedDiff < 0) trend = 'down';
+  if (roundedDiff !== null) {
+    if (roundedDiff > 0) trend = 'up';
+    if (roundedDiff < 0) trend = 'down';
+  }
 
   return {
     value: Math.round(currentMargin * 10) / 10,
     previousValue: Math.round(prevMargin * 10) / 10,
-    changePercentage: Math.abs(roundedDiff),
-    trend
+    changePercentage: roundedDiff !== null ? Math.abs(roundedDiff) : null,
+    trend,
+    isPercentagePoint: true
   };
 }
 
@@ -56,7 +71,6 @@ export async function GET(req: NextRequest): Promise<NextResponse<DashboardSumma
       return NextResponse.json({ success: false, error: 'Missing date range parameters' }, { status: 400 });
     }
 
-    // 1. Calculate previous period dates for comparison
     const fromDate = new Date(from);
     const toDate = new Date(to);
     const durationMs = toDate.getTime() - fromDate.getTime();
@@ -67,32 +81,15 @@ export async function GET(req: NextRequest): Promise<NextResponse<DashboardSumma
     const prevFrom = prevFromDate.toISOString().split('T')[0];
     const prevTo = prevToDate.toISOString().split('T')[0];
 
-    // 2. Fetch data for CURRENT period (now includes Etsy expenses)
-    const [currentSales, currentFedEx, currentMaterial, currentEtsy] = await Promise.all([
-      getTotalSales(from, to),
-      getFedExExpenses(from, to),
-      getMaterialExpenses(from, to),
-      getEtsyExpenses(from, to),
-    ]);
-    const currentExpenses = currentFedEx + currentMaterial + currentEtsy;
-    const currentProfit = currentSales - currentExpenses;
+    const currentSummary = await OrderFinancialService.getDashboardSummary(from, to);
+    const prevSummary = await OrderFinancialService.getDashboardSummary(prevFrom, prevTo);
 
-    // 3. Fetch data for PREVIOUS period
-    const [prevSales, prevFedEx, prevMaterial, prevEtsy] = await Promise.all([
-      getTotalSales(prevFrom, prevTo),
-      getFedExExpenses(prevFrom, prevTo),
-      getMaterialExpenses(prevFrom, prevTo),
-      getEtsyExpenses(prevFrom, prevTo),
-    ]);
-    const prevExpenses = prevFedEx + prevMaterial + prevEtsy;
-    const prevProfit = prevSales - prevExpenses;
-
-    // 4. Calculate KPIs
     const responseData = {
-      totalSales: calculateKPI(currentSales, prevSales),
-      totalExpenses: calculateKPI(currentExpenses, prevExpenses),
-      grossProfit: calculateKPI(currentProfit, prevProfit),
-      profitMargin: calculateMarginKPI(currentProfit, currentSales, prevProfit, prevSales),
+      totalSales: calculateKPI(currentSummary.totalSales, prevSummary.totalSales),
+      totalExpenses: calculateKPI(currentSummary.totalExpenses, prevSummary.totalExpenses),
+      grossProfit: calculateKPI(currentSummary.netProfit, prevSummary.netProfit),
+      profitMargin: calculateMarginKPI(currentSummary.profitMargin, prevSummary.profitMargin),
+      refundValue: calculateKPI(currentSummary.refundValue, prevSummary.refundValue),
     };
 
     return NextResponse.json({ success: true, data: responseData });

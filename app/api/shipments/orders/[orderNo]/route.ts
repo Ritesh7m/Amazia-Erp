@@ -1,32 +1,37 @@
 import { NextResponse } from 'next/server';
-import { DUMMY_SHIPMENTS, ORDER_TO_AWBS_MAP, AWB_TO_ORDERS_MAP } from '@/lib/dummyShipmentData';
+import { shipmentApi } from '@/services/shipmentApi';
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ orderNo: string }> } 
+  { params }: { params: Promise<{ orderNo: string }> }
 ) {
-  
-  const { orderNo } = await params; 
-  
-  const awbNumbers = ORDER_TO_AWBS_MAP[orderNo] || [];
+  try {
+    const { orderNo } = await params;
 
-  const shipments = awbNumbers.map(awb => {
-    const details = DUMMY_SHIPMENTS[awb];
-    return {
-      awbNumber: awb,
-      processCode: details.processCode,
-      shippingStatus: details.shippingStatus,
-      customerName: details.customerName,
-      shippedAt: details.shippedAt,
-      orders: AWB_TO_ORDERS_MAP[awb] 
-    };
-  });
-
-  return NextResponse.json({
-    data: {
-      orderNo: orderNo,
-      awbNumbers: awbNumbers,
-      shipments: shipments
+    if (!orderNo) {
+      return NextResponse.json(
+        { success: false, message: 'Order number is required' },
+        { status: 400 }
+      );
     }
-  });
+
+    const result = await shipmentApi.getAwbsByOrder(orderNo);
+
+    if (!result.success) {
+      return NextResponse.json(
+        { success: false, message: result.message || 'Shipment service unavailable' },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({
+      data: result.data,
+    });
+  } catch (error: any) {
+    console.error('Error in GET /api/shipments/orders/[orderNo]:', error);
+    return NextResponse.json(
+      { success: false, message: 'Shipment service unavailable' },
+      { status: 500 }
+    );
+  }
 }

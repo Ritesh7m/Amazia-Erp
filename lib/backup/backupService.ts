@@ -3,6 +3,7 @@
 import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
+import { getConnection, closeConnection } from '@/database';
 import { backupConfig, validateConfig } from './config';
 import { uploadToDrive, cleanUpDriveBackups } from './driveService';
 
@@ -70,6 +71,21 @@ export async function runBackupWorkflow() {
   if (databases.length === 0) {
     console.log('[Backup Service] No database files (.db, .wal) found to backup.');
     return;
+  }
+
+  // Ensure database is in a consistent state before copying by forcing a checkpoint
+  try {
+    console.log('[Backup Service] Forcing DuckDB checkpoint for consistent backup...');
+    const conn = await getConnection();
+    await new Promise<void>((resolve, reject) => {
+      conn.run('FORCE CHECKPOINT;', (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    // We don't close the global connection, just release our reference or let it be
+  } catch (err: any) {
+    console.warn('[Backup Service] Failed to force checkpoint. Backup might be inconsistent if writes are ongoing:', err.message);
   }
 
   // Create a safe, filesystem-friendly timestamp

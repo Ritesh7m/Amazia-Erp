@@ -1,6 +1,11 @@
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
-import { ETSY_EXPENSE_TYPES, type EtsyExpenseType } from '@/config/appConfig';
+import { 
+  ETSY_TRANSACTION_CATEGORIES, 
+  ETSY_TRANSACTION_SCOPES, 
+  type EtsyTransactionCategory, 
+  type EtsyTransactionScope 
+} from '@/config/appConfig';
 
 // Extend dayjs to support strict format parsing
 dayjs.extend(customParseFormat);
@@ -90,25 +95,61 @@ export const extractEtsyListingId = (text: string | undefined): string | null =>
 };
 
 /**
- * Classifies an Etsy transaction into an expense type based on its description/title.
- * Uses case-insensitive matching on the combined description text.
+ * Classifies an Etsy transaction into scope and category based on business rules.
  */
-export const classifyEtsyExpense = (
+export const classifyEtsyTransaction = (
   type: string,
   title: string,
-  info: string
-): EtsyExpenseType => {
-  // Combine all text fields for matching, case-insensitive
+  info: string,
+  hasOrderNo: boolean
+): { scope: EtsyTransactionScope; category: EtsyTransactionCategory } => {
   const combined = `${type} ${title} ${info}`.toLowerCase();
 
-  // Order matters: match specific tax/fee types before general ones
-  if (combined.includes('tds') || combined.includes('tax deducted')) return ETSY_EXPENSE_TYPES.TDS;
-  if (combined.includes('tcs') || combined.includes('tax collected')) return ETSY_EXPENSE_TYPES.TCS;
-  if (combined.includes('regulatory') || combined.includes('operating fee')) return ETSY_EXPENSE_TYPES.REGULATORY_OPERATING_FEE;
-  if (combined.includes('processing')) return ETSY_EXPENSE_TYPES.PROCESSING_FEE;
-  if (combined.includes('transaction')) return ETSY_EXPENSE_TYPES.TRANSACTION_FEE;
-  if (combined.includes('sales tax') || combined.includes('tax paid by buyer')) return ETSY_EXPENSE_TYPES.SALES_TAX;
-  if (combined.includes('listing')) return ETSY_EXPENSE_TYPES.LISTING_EXPENSE;
+  // Deposits
+  if (type.toLowerCase() === 'deposit' || combined.includes('sent to your payoneer') || combined.includes('deposit')) {
+    return { scope: ETSY_TRANSACTION_SCOPES.IGNORE, category: ETSY_TRANSACTION_CATEGORIES.DEPOSIT };
+  }
 
-  return ETSY_EXPENSE_TYPES.OTHER_ETSY_EXPENSE;
+  // Refunds
+  if (type.toLowerCase() === 'refund' || combined.includes('refund for order') || combined.includes('partial refund')) {
+    return { scope: ETSY_TRANSACTION_SCOPES.REFUND, category: ETSY_TRANSACTION_CATEGORIES.REFUND };
+  }
+  
+  // Sales
+  if (type.toLowerCase() === 'sale' || combined.includes('payment for order')) {
+    return { scope: ETSY_TRANSACTION_SCOPES.SALE, category: ETSY_TRANSACTION_CATEGORIES.SALE };
+  }
+
+  // Etsy Ads
+  if (combined.includes('etsy ads')) {
+    return { scope: ETSY_TRANSACTION_SCOPES.ETSY, category: ETSY_TRANSACTION_CATEGORIES.ETSY_ADS };
+  }
+
+  // Offsite Ads
+  if (combined.includes('offsite ads')) {
+    return { scope: ETSY_TRANSACTION_SCOPES.ORDER, category: ETSY_TRANSACTION_CATEGORIES.OFFSITE_ADS };
+  }
+
+  // Listing Fee
+  if (combined.includes('listing')) {
+    return { scope: ETSY_TRANSACTION_SCOPES.ETSY, category: ETSY_TRANSACTION_CATEGORIES.LISTING_FEE };
+  }
+
+  // Order-level categories
+  let category: EtsyTransactionCategory = ETSY_TRANSACTION_CATEGORIES.OTHER_ORDER_EXPENSE;
+  
+  if (combined.includes('tds') || combined.includes('tax deducted')) category = ETSY_TRANSACTION_CATEGORIES.TDS;
+  else if (combined.includes('tcs') || combined.includes('tax collected')) category = ETSY_TRANSACTION_CATEGORIES.TCS;
+  else if (combined.includes('regulatory') || combined.includes('operating fee')) category = ETSY_TRANSACTION_CATEGORIES.REGULATORY_FEE;
+  else if (combined.includes('processing')) category = ETSY_TRANSACTION_CATEGORIES.PROCESSING_FEE;
+  else if (combined.includes('transaction')) category = ETSY_TRANSACTION_CATEGORIES.TRANSACTION_FEE;
+  else if (combined.includes('buyer fee')) category = ETSY_TRANSACTION_CATEGORIES.BUYER_FEE;
+  else if (combined.includes('sales tax') || combined.includes('tax paid by buyer')) category = ETSY_TRANSACTION_CATEGORIES.SALES_TAX;
+
+  // Determine scope based on presence of order number
+  if (hasOrderNo) {
+    return { scope: ETSY_TRANSACTION_SCOPES.ORDER, category };
+  }
+
+  return { scope: ETSY_TRANSACTION_SCOPES.ETSY, category: category === ETSY_TRANSACTION_CATEGORIES.OTHER_ORDER_EXPENSE ? ETSY_TRANSACTION_CATEGORIES.OTHER_ETSY_EXPENSE : category };
 };

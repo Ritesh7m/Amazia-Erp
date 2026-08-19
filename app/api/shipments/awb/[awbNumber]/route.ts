@@ -1,33 +1,37 @@
 import { NextResponse } from 'next/server';
-import { DUMMY_SHIPMENTS, AWB_TO_ORDERS_MAP } from '@/lib/dummyShipmentData';
+import { shipmentApi } from '@/services/shipmentApi';
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ awbNumber: string }> } 
+  { params }: { params: Promise<{ awbNumber: string }> }
 ) {
+  try {
+    const { awbNumber } = await params;
 
-  const { awbNumber } = await params;
-  
-  const orders = AWB_TO_ORDERS_MAP[awbNumber] || [];
-  const details = DUMMY_SHIPMENTS[awbNumber];
-
-  let shipments = [];
-  
-  if (details) {
-    shipments.push({
-      processCode: details.processCode,
-      shippingStatus: details.shippingStatus,
-      customerName: details.customerName,
-      shippedAt: details.shippedAt,
-      orders: orders
-    });
-  }
-
-  return NextResponse.json({
-    data: {
-      awbNumber: awbNumber,
-      orders: orders,
-      shipments: shipments
+    if (!awbNumber) {
+      return NextResponse.json(
+        { success: false, message: 'AWB number is required' },
+        { status: 400 }
+      );
     }
-  });
+
+    const result = await shipmentApi.getOrdersByAwb(awbNumber);
+
+    if (!result.success) {
+      return NextResponse.json(
+        { success: false, message: result.message || 'Shipment service unavailable' },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({
+      data: result.data,
+    });
+  } catch (error: any) {
+    console.error('Error in GET /api/shipments/awb/[awbNumber]:', error);
+    return NextResponse.json(
+      { success: false, message: 'Shipment service unavailable' },
+      { status: 500 }
+    );
+  }
 }

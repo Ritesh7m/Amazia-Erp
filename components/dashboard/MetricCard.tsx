@@ -4,13 +4,14 @@ interface MetricCardProps {
   title: string;
   value: number | string;
   previousValue?: number;
-  changePercentage?: number;
+  changePercentage?: number | null;
   trend?: 'up' | 'down' | 'neutral';
   prefix?: string;
   suffix?: string;
   isLoading?: boolean;
   inverseTrendColor?: boolean; 
   comparisonText?: string;
+  isPercentagePoint?: boolean;
 }
 
 export default function MetricCard({
@@ -22,7 +23,8 @@ export default function MetricCard({
   suffix = '',
   isLoading = false,
   inverseTrendColor = false,
-  comparisonText = 'vs previous period'
+  comparisonText = 'vs previous period',
+  isPercentagePoint = false
 }: MetricCardProps) {
   // Format numbers to Indian standard (e.g. 12,45,680)
   const formattedValue = typeof value === 'number' 
@@ -43,6 +45,8 @@ export default function MetricCard({
     bgColor = inverseTrendColor ? 'bg-[var(--color-brand-success)]' : 'bg-[var(--color-brand-danger)]';
     ArrowIcon = () => <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>;
   }
+
+  const isNA = changePercentage === null || changePercentage === undefined;
 
   if (isLoading) {
     return (
@@ -67,11 +71,17 @@ export default function MetricCard({
       </div>
 
       <div className="flex items-center text-xs mt-auto">
-        <span className={`flex items-center font-medium px-1.5 py-0.5 rounded-md ${bgColor} ${trendColor}`}>
-          {ArrowIcon && <ArrowIcon />}
-          {changePercentage}%
-        </span>
-        <span className="text-[var(--color-brand-muted)] ml-2">{comparisonText}</span>
+        {isNA ? (
+          <span className="flex items-center font-medium px-1.5 py-0.5 rounded-md bg-gray-100 text-[var(--color-brand-muted)]">
+            N/A
+          </span>
+        ) : (
+          <span className={`flex items-center font-medium px-1.5 py-0.5 rounded-md ${bgColor} ${trendColor}`}>
+            {ArrowIcon && <ArrowIcon />}
+            {changePercentage}{isPercentagePoint ? 'pp' : '%'}
+          </span>
+        )}
+        <span className="text-[var(--color-brand-muted)] ml-2">{isNA ? 'No previous data' : comparisonText}</span>
       </div>
     </div>
   );

@@ -22,7 +22,7 @@ export const backupConfig = {
 
   // 3. Backup Rules & Retention
   rules: {
-    cronSchedule: process.env.BACKUP_CRON_SCHEDULE || '0 2 * * *', // Default: 2 AM daily
+    cronSchedule: process.env.BACKUP_CRON_SCHEDULE || '0 11 * * *', // Default: 11 AM daily
     retentionDays: parseInt(process.env.RETENTION_DAYS || '7', 10),
     maxRetries: parseInt(process.env.MAX_UPLOAD_RETRIES || '3', 10),
   }

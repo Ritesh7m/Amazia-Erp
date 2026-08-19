@@ -21,16 +21,37 @@ export const processFedexImport = async (
   const fileHash = generateFileHash(fileBuffer);
 
   try {
-    const existing = await fetchQuery<{ id: number }>(
-      `SELECT id FROM import_history WHERE file_hash = ?`,
+    const existing = await fetchQuery<{ id: number, status: string }>(
+      `SELECT id, status FROM import_history WHERE file_hash = ?`,
       [fileHash]
     );
 
+    let importId: number;
+
     if (existing && existing.length > 0) {
-      return {
-        status: HTTP_STATUS.CONFLICT,
-        data: { success: false, message: 'This file has already been imported.' }
-      };
+      if (existing[0].status === 'SUCCESS') {
+        return {
+          status: HTTP_STATUS.CONFLICT,
+          data: { success: false, message: 'This file has already been imported.' }
+        };
+      } else {
+        importId = existing[0].id;
+        const conn = await getConnection();
+        await executePreparedStatement(conn, `UPDATE import_history SET status = 'PROCESSING' WHERE id = ?`, [importId]);
+        conn.close();
+      }
+    } else {
+      const conn = await getConnection();
+      const initQuery = `
+        INSERT INTO import_history (
+          file_name, file_hash, file_size, status, invoice_type, total_rows, imported_rows, failed_rows, processing_time
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+      `;
+      const res = await new Promise<any[]>((resolve, reject) => {
+        conn.all(initQuery, ...[fileName, fileHash, fileSize, 'PROCESSING', SUPPORTED_INVOICE_TYPES.FEDEX, 0, 0, 0, 0], (err: any, rows: any) => err ? reject(err) : resolve(rows));
+      });
+      importId = res[0]?.id;
+      conn.close();
     }
 
     const records = await parseFedexCsv(fileBuffer);
@@ -56,15 +77,10 @@ export const processFedexImport = async (
       const processingTime = Date.now() - startTime;
       const conn = await getConnection();
       const failHistoryQuery = `
-        INSERT INTO import_history (
-          file_name, file_hash, file_size, status, invoice_type,
-          total_rows, imported_rows, failed_rows, processing_time
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        UPDATE import_history SET status = 'FAILED', failed_rows = ?, processing_time = ? WHERE id = ?
       `;
-      
       await executePreparedStatement(conn, failHistoryQuery, [
-        fileName, fileHash, fileSize, 'FAILED', SUPPORTED_INVOICE_TYPES.FEDEX,
-        records.length, 0, failedRowCount, processingTime
+        failedRowCount, processingTime, importId
       ]);
 
       return {
@@ -97,16 +113,20 @@ export const processFedexImport = async (
 
       const processingTime = Date.now() - startTime;
       const historyQuery = `
-        INSERT INTO import_history (
-          file_name, file_hash, file_size, status, invoice_type,
-          total_rows, imported_rows, failed_rows, processing_time
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        UPDATE import_history SET status = 'SUCCESS', total_rows = ?, imported_rows = ?, failed_rows = 0, processing_time = ?
+        WHERE id = ?
       `;
       
       await executePreparedStatement(conn, historyQuery, [
-        fileName, fileHash, fileSize, 'SUCCESS', SUPPORTED_INVOICE_TYPES.FEDEX,
-        records.length, records.length, 0, processingTime
+        records.length, records.length, processingTime, importId
       ]);
+
+      const syncMetaQuery = `
+        UPDATE sync_metadata 
+        SET last_processed_row = ?, last_sync_at = CURRENT_TIMESTAMP
+        WHERE sync_name = 'fedex_billing'
+      `;
+      await executePreparedStatement(conn, syncMetaQuery, [records.length]);
     });
 
     return {
@@ -120,6 +140,13 @@ export const processFedexImport = async (
 
   } catch (error) {
     console.error('[FedEx Importer] Error during import:', error);
+    try {
+      const conn = await getConnection();
+      await executePreparedStatement(conn, `UPDATE import_history SET status = 'FAILED' WHERE file_hash = ?`, [fileHash]);
+      conn.close();
+    } catch (e) {
+      console.error('[FedEx Importer] Could not update failure status:', e);
+    }
     return {
       status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
       data: { success: false, message: 'Database Error. Transaction rolled back.' }

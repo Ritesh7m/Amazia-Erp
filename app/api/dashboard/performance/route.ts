@@ -1,32 +1,10 @@
 import { NextResponse } from 'next/server';
-import { getMonthlySales, getMonthlyFedEx, getMonthlyMaterials, getMonthlyEtsyExpenses } from '@/lib/dashboard/dashboardQueries';
+import { OrderFinancialService } from '@/services/financial/order-financial-service';
 
-// Formats '2026-06' into 'Jun 2026'
 const formatMonth = (yyyyMm: string) => {
   const [year, month] = yyyyMm.split('-');
   const date = new Date(parseInt(year), parseInt(month) - 1);
   return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-};
-
-// Generates an array of every "YYYY-MM" between the start and end dates
-const generateMonthRange = (startDateStr: string, endDateStr: string) => {
-  const start = new Date(startDateStr);
-  const end = new Date(endDateStr);
-  const months = [];
-  
-  // Set to the 1st of the month to avoid timezone/day-skipping edge cases
-  let current = new Date(start.getFullYear(), start.getMonth(), 1);
-  const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
-  
-  while (current <= endMonth) {
-    const year = current.getFullYear();
-    const month = String(current.getMonth() + 1).padStart(2, '0');
-    months.push(`${year}-${month}`);
-    // Move to the next month
-    current.setMonth(current.getMonth() + 1);
-  }
-  
-  return months;
 };
 
 export async function GET(request: Request) {
@@ -39,45 +17,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'Missing date range' }, { status: 400 });
     }
 
-    const [monthlySales, monthlyFedEx, monthlyMaterials, monthlyEtsy] = await Promise.all([
-      getMonthlySales(from, to),
-      getMonthlyFedEx(from, to),
-      getMonthlyMaterials(from, to),
-      getMonthlyEtsyExpenses(from, to),
-    ]);
+    const performanceData = await OrderFinancialService.getPerformance(from, to);
 
-    // Get a continuous sequence of months regardless of whether data exists
-    const allMonths = generateMonthRange(from, to);
-
-    const chartData = allMonths.map(month => {
-      // Look up the data for this specific month (will be undefined if nothing happened)
-      const salesItem = monthlySales.find(s => s.month === month);
-      const fedexItem = monthlyFedEx.find(f => f.month === month);
-      const materialItem = monthlyMaterials.find(m => m.month === month);
-      const etsyItem = monthlyEtsy.find(e => e.month === month);
-
-      // Default to 0 if the item doesn't exist
-      const salesAmount = salesItem?.total || 0;
-      const dutyCost = fedexItem?.total || 0;
-      const materialCost = materialItem?.total || 0;
-      const etsyExpenses = etsyItem?.total || 0;
-      
-      // Updated: expenses now include Etsy expenses
-      const expenses = dutyCost + materialCost + etsyExpenses;
-      const profit = salesAmount - expenses;
-      const margin = salesAmount > 0 ? ((profit / salesAmount) * 100).toFixed(1) : 0;
-
-      return {
-        month: formatMonth(month),
-        sales: salesAmount,
-        expenses: expenses,
-        materialCost: materialCost, 
-        dutyCost: dutyCost,
-        etsyExpenses: etsyExpenses,
-        profit: profit,
-        margin: margin
-      };
-    });
+    const chartData = performanceData.map(item => ({
+      ...item,
+      month: formatMonth(item.month)
+    }));
 
     return NextResponse.json({ success: true, data: chartData });
   } catch (error) {

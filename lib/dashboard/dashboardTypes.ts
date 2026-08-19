@@ -1,8 +1,9 @@
 export interface KPIData {
   value: number;
   previousValue: number;
-  changePercentage: number;
+  changePercentage: number | null;
   trend: 'up' | 'down' | 'neutral';
+  isPercentagePoint?: boolean;
 }
 
 export interface DashboardSummaryResponse {
@@ -12,6 +13,7 @@ export interface DashboardSummaryResponse {
     totalExpenses: KPIData;
     grossProfit: KPIData;
     profitMargin: KPIData;
+    refundValue: KPIData;
   };
   error?: string;
 }
@@ -32,6 +34,8 @@ export interface ChartDataPoint {
   expenses: number;
   profit: number;
   margin: number;
+  listingExpenses?: number;
+  refunds?: number;
 }
 
 export interface ExpenseBreakdownPoint {
@@ -50,7 +54,7 @@ export interface ExpenseBreakdown {
   processingFee: number;
   salesTax: number;
   regulatoryFee: number;
-  otherEtsyExpense: number;
+  etsyExpenses: number;
   totalExpense: number;
 }
 
@@ -65,6 +69,8 @@ export interface OrderData {
   margin: number;
   status: 'Profitable' | 'Loss' | 'Neutral';
   expenseBreakdown: ExpenseBreakdown;
+  refundStatus?: 'Refunded' | 'Partially Refunded' | null;
+  refundAmount?: number;
 }
 
 export interface ActivityData {

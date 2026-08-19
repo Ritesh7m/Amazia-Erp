@@ -220,7 +220,7 @@ http://localhost:3000/api/inventory/sync
 
 # Shipment Mapping Endpoint
 
-Dummy endpoint used to generate Order ↔ AWB mappings.
+Endpoint used to synchronize Order ↔ AWB mappings from the Shipment API service into DuckDB.
 
 ### Request
 

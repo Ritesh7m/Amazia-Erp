@@ -35,6 +35,7 @@ function DashboardContent() {
   }>({ data: [], total: 0 });
   const [ordersData, setOrdersData] = useState<OrderData[]>([]);
   const [ordersMeta, setOrdersMeta] = useState({ totalRecords: 0, page: 1, pageSize: 10, totalPages: 1 });
+  const [showRefundedOnly, setShowRefundedOnly] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +56,7 @@ function DashboardContent() {
           fetch(`/api/dashboard/summary?from=${from}&to=${to}`),
           fetch(`/api/dashboard/performance?from=${from}&to=${to}`),
           fetch(`/api/dashboard/expense-breakdown?from=${from}&to=${to}`),
-          fetch(`/api/dashboard/orders?from=${from}&to=${to}&page=${currentPage}&pageSize=10`),
+          fetch(`/api/dashboard/orders?from=${from}&to=${to}&page=${currentPage}&pageSize=10&refundedOnly=${showRefundedOnly}`),
         ]);
 
         const sumResult = await sumRes.json();
@@ -84,7 +85,7 @@ function DashboardContent() {
     };
 
     fetchDashboardData();
-  }, [from, to, currentPage]);
+  }, [from, to, currentPage, showRefundedOnly]);
 
   const handlePageChange = useCallback((newPage: number) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -117,7 +118,7 @@ function DashboardContent() {
       )}
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
         <MetricCard
           title="Total Sales"
           value={summaryData?.totalSales.value || 0}
@@ -138,6 +139,16 @@ function DashboardContent() {
           comparisonText={getComparisonText()}
         />
         <MetricCard
+          title="Refund Value"
+          value={summaryData?.refundValue?.value || 0}
+          changePercentage={summaryData?.refundValue?.changePercentage}
+          trend={summaryData?.refundValue?.trend}
+          prefix="₹"
+          isLoading={loading}
+          inverseTrendColor={true} // High refunds = warning color
+          comparisonText={getComparisonText()}
+        />
+        <MetricCard
           title="Net Profit"
           value={summaryData?.grossProfit.value || 0}
           changePercentage={summaryData?.grossProfit.changePercentage}
@@ -151,9 +162,10 @@ function DashboardContent() {
           value={summaryData?.profitMargin.value || 0}
           changePercentage={summaryData?.profitMargin.changePercentage}
           trend={summaryData?.profitMargin.trend}
+          isPercentagePoint={summaryData?.profitMargin.isPercentagePoint}
           suffix="%"
           isLoading={loading}
-          comparisonText={getComparisonText().replace("vs", "pp vs")} // pp = percentage points
+          comparisonText={getComparisonText()}
         />
       </div>
 
@@ -171,8 +183,32 @@ function DashboardContent() {
         </div>
       </div>
 
-      {/* Orders Table */}
-      <div className="mb-6">
+      {/* Orders Table section */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4 mt-8">
+        <h2 className="text-xl font-bold text-[var(--color-brand-primary)]">Recent Orders</h2>
+        
+        {/* Refund Toggle */}
+        <label className="flex items-center gap-3 cursor-pointer select-none bg-[var(--color-brand-card)] px-4 py-2 rounded-xl border border-[var(--color-brand-border)] shadow-sm hover:bg-[var(--color-brand-background)] transition-colors">
+          <div className="relative">
+            <input 
+              type="checkbox" 
+              className="sr-only" 
+              checked={showRefundedOnly}
+              onChange={() => {
+                setShowRefundedOnly(!showRefundedOnly);
+                handlePageChange(1);
+              }}
+            />
+            <div className={`block w-10 h-6 rounded-full transition-colors ${showRefundedOnly ? 'bg-amber-500' : 'bg-gray-300'}`}></div>
+            <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${showRefundedOnly ? 'transform translate-x-4' : ''}`}></div>
+          </div>
+          <span className="text-sm font-semibold text-[var(--color-brand-primary)]">
+            Show Refunded Orders Only
+          </span>
+        </label>
+      </div>
+
+      <div className="mb-10">
         <OrdersTable
           data={ordersData}
           totalRecords={ordersMeta.totalRecords}

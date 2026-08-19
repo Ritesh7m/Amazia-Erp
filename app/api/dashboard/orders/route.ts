@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOrders } from '@/lib/dashboard/dashboardQueries';
+import { OrderFinancialService } from '@/services/financial/order-financial-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
     const q = searchParams.get('q') || '';
+    const refundedOnly = searchParams.get('refundedOnly') === 'true';
 
     // Validate dates
     if (!from || !to) {
@@ -43,12 +44,13 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, parseInt(rawPage) || 1);
     const offset = (page - 1) * pageSize;
 
-    const { data, totalRecords } = await getOrders(
+    const { data, totalRecords } = await OrderFinancialService.getOrders(
       from,
       to,
       pageSize,
       offset,
-      q
+      q,
+      refundedOnly
     );
 
     return NextResponse.json({

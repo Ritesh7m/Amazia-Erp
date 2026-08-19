@@ -6,6 +6,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   'Material Cost': '#184B4D',
   'FedEx Duty/Transportation': '#E4D4BA',
   'Etsy Listing Expense': '#4B8B84',
+  'Etsy Ads': '#F59E0B',
+  'Offsite Ads': '#F97316',
   'Other Etsy Expenses': '#94A3B8',
 };
 
@@ -13,6 +15,8 @@ const DISPLAY_CATEGORY_NAMES = [
   'Material Cost',
   'FedEx Duty/Transportation',
   'Etsy Listing Expense',
+  'Etsy Ads',
+  'Offsite Ads',
   'Other Etsy Expenses',
 ];
 
