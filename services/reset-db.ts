@@ -9,8 +9,15 @@ console.log(`Connecting to database at: ${dbPath}`);
 
 const resetScript = `
   -- =================================================================
-  -- 1. DROP ALL EXISTING & LEGACY TABLES
+  -- 1. DROP ALL EXISTING & LEGACY TABLES & VIEWS
   -- =================================================================
+  
+  -- Drop missing views and tables identified from the database state
+  DROP VIEW IF EXISTS v_order_etsy_allocations;
+  DROP TABLE IF EXISTS etsy_allocation_batches;
+  DROP TABLE IF EXISTS etsy_order_allocations;
+
+  -- Drop existing tracked tables
   DROP TABLE IF EXISTS etsy_listing_allocations;
   DROP TABLE IF EXISTS order_listing_allocations;
   DROP TABLE IF EXISTS etsy_expenses;
@@ -94,12 +101,14 @@ const resetScript = `
   -- FedEx Billing Invoices
   CREATE TABLE fedex_billing (
     id INTEGER PRIMARY KEY DEFAULT nextval('seq_fedex_billing'),
-    invoice_type VARCHAR,
-    invoice_date DATE,
-    due_date DATE,
+    invoice_number VARCHAR,
     awb_number VARCHAR,
-    air_waybill_total_amount DOUBLE,
-    book_expense_cost DOUBLE,
+    shipment_date DATE,
+    transportation_charges DECIMAL(15, 2),
+    duty DECIMAL(15, 2),
+    taxes DECIMAL(15, 2),
+    other_charges DECIMAL(15, 2),
+    total_cost DECIMAL(15, 2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 

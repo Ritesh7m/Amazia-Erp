@@ -45,16 +45,13 @@ export const processAndAggregateInventory = (
     }
 
     // Business Key for Aggregation
-    // FIX: We now group strictly by Order ID so quantities merge into one row
-    const hashKey = normalizedOrderId;
+    // FIX: We now group strictly by the unique inventory attributes
+    const hashKey = `${normalizedOrderId}-${row.materialType.trim()}-${row.category.trim()}-${row.color.trim()}`;
 
     if (aggregationMap.has(hashKey)) {
       const existing = aggregationMap.get(hashKey)!;
       // Add the new quantity to the existing total
       existing.quantity += quantity;
-      
-      // Note: The material_type, category, and color will simply stay 
-      // as whatever the very first item in the order was (e.g., "Cotton", "Lines", "Green").
     } else {
       aggregationMap.set(hashKey, {
         order_no: normalizedOrderId,

@@ -172,8 +172,14 @@ export const initializeDatabase = async (): Promise<void> => {
     `CREATE SEQUENCE IF NOT EXISTS seq_fedex_billing;`,
     `CREATE TABLE IF NOT EXISTS fedex_billing (
       id INTEGER DEFAULT nextval('seq_fedex_billing') PRIMARY KEY,
-      invoice_type VARCHAR, invoice_date DATE, due_date DATE, awb_number VARCHAR,
-      air_waybill_total_amount DECIMAL(15, 2), book_expense_cost DECIMAL(15, 2),
+      invoice_number VARCHAR,
+      awb_number VARCHAR,
+      shipment_date DATE,
+      transportation_charges DECIMAL(15, 2),
+      duty DECIMAL(15, 2),
+      taxes DECIMAL(15, 2),
+      other_charges DECIMAL(15, 2),
+      total_cost DECIMAL(15, 2),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );`,
     
@@ -345,7 +351,9 @@ export const initializeDatabase = async (): Promise<void> => {
       )
       SELECT 
         m.order_no,
-        SUM(f.air_waybill_total_amount / c.total_orders_in_awb) as fedex_cost,
+        SUM(f.total_cost / c.total_orders_in_awb) as fedex_cost,
+        SUM(f.duty / c.total_orders_in_awb) as fedex_duty,
+        SUM(f.transportation_charges / c.total_orders_in_awb) as fedex_transportation,
         STRING_AGG(DISTINCT m.awb_number, ', ') as awb_numbers
       FROM order_awb_mapping m
       JOIN fedex_billing f ON TRIM(CAST(m.awb_number AS VARCHAR)) = TRIM(CAST(f.awb_number AS VARCHAR))
@@ -368,6 +376,8 @@ export const initializeDatabase = async (): Promise<void> => {
         COALESCE(r.refunds, 0) AS refunds,
         COALESCE(m.material_cost, 0) AS material_cost,
         COALESCE(f.fedex_cost, 0) AS fedex_cost,
+        COALESCE(f.fedex_duty, 0) AS fedex_duty,
+        COALESCE(f.fedex_transportation, 0) AS fedex_transportation,
         COALESCE(f.awb_numbers, 'N/A') AS awb_numbers,
         COALESCE(a.etsy_listing_expense, 0) AS etsy_listing_expense,
         COALESCE(a.etsy_ads_expense, 0) AS etsy_ads_expense,
