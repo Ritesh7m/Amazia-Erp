@@ -327,16 +327,20 @@ export class OrderFinancialService {
    * Fetch detailed sync statuses for various providers.
    */
   static async getSyncStatuses(): Promise<SyncStatuses> {
-    const etsySuccess = await fetchQuery<any>(`SELECT MAX(created_at) AS last_sync_at FROM import_history WHERE invoice_type = 'ETSY' AND status = 'SUCCESS'`);
+    const etsySuccess = await fetchQuery<any>(`SELECT MAX(created_at) AS last_sync_at FROM etsy_imports WHERE status = 'SUCCESS'`);
     const fedexSuccess = await fetchQuery<any>(`SELECT MAX(created_at) AS last_sync_at FROM import_history WHERE invoice_type = 'FEDEX' AND status = 'SUCCESS'`);
+    
+    // Also fetch from sync_metadata as fallback
+    const syncMetaEtsy = await fetchQuery<any>(`SELECT last_sync_at FROM sync_metadata WHERE sync_name = 'etsy'`);
+    const syncMetaFedex = await fetchQuery<any>(`SELECT last_sync_at FROM sync_metadata WHERE sync_name = 'fedex_billing'`);
     const inventoryQuery = await fetchQuery<any>(`SELECT last_sync_at FROM sync_metadata WHERE sync_name = 'google_sheets_inventory'`);
 
-    const etsyLatest = await fetchQuery<any>(`SELECT status FROM import_history WHERE invoice_type = 'ETSY' ORDER BY created_at DESC LIMIT 1`);
+    const etsyLatest = await fetchQuery<any>(`SELECT status FROM etsy_imports ORDER BY created_at DESC LIMIT 1`);
     const fedexLatest = await fetchQuery<any>(`SELECT status FROM import_history WHERE invoice_type = 'FEDEX' ORDER BY created_at DESC LIMIT 1`);
 
     const inventoryDate = inventoryQuery[0]?.last_sync_at || null;
-    const etsyDate = etsySuccess[0]?.last_sync_at || null;
-    const fedexDate = fedexSuccess[0]?.last_sync_at || null;
+    const etsyDate = etsySuccess[0]?.last_sync_at || syncMetaEtsy[0]?.last_sync_at || null;
+    const fedexDate = fedexSuccess[0]?.last_sync_at || syncMetaFedex[0]?.last_sync_at || null;
 
     const etsyLatestStatus = etsyLatest[0]?.status;
     const fedexLatestStatus = fedexLatest[0]?.status;

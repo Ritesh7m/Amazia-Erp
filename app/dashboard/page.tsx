@@ -8,6 +8,7 @@ import MetricCard from "@/components/dashboard/MetricCard";
 import BusinessPerformanceChart from "@/components/dashboard/BusinessPerformanceChart";
 import ExpenseBreakdownChart from "@/components/dashboard/ExpenseBreakdownChart";
 import OrdersTable from "@/components/dashboard/OrdersTable";
+import OrderDetailsModal from "@/components/dashboard/OrderDetailsModal";
 
 // Types
 import {
@@ -36,6 +37,9 @@ function DashboardContent() {
   const [ordersData, setOrdersData] = useState<OrderData[]>([]);
   const [ordersMeta, setOrdersMeta] = useState({ totalRecords: 0, page: 1, pageSize: 10, totalPages: 1 });
   const [showRefundedOnly, setShowRefundedOnly] = useState(false);
+  
+  // Unified Modal State
+  const [activeOrderNo, setActiveOrderNo] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +113,7 @@ function DashboardContent() {
 
   return (
     <div>
-      <DashboardFilters />
+      <DashboardFilters onOpenOrderDetails={setActiveOrderNo} />
 
       {error && (
         <div className="p-4 mb-6 text-sm text-red-600 bg-red-50 rounded-[var(--radius-xl)] border border-red-100 animate-fade-in">
@@ -118,7 +122,7 @@ function DashboardContent() {
       )}
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 xl:gap-5 mb-6">
         <MetricCard
           title="Total Sales"
           value={summaryData?.totalSales.value || 0}
@@ -217,8 +221,14 @@ function DashboardContent() {
           totalPages={ordersMeta.totalPages}
           isLoading={loading}
           onPageChange={handlePageChange}
+          onOpenOrderDetails={setActiveOrderNo}
         />
       </div>
+
+      <OrderDetailsModal 
+        orderNo={activeOrderNo} 
+        onClose={() => setActiveOrderNo(null)} 
+      />
     </div>
   );
 }

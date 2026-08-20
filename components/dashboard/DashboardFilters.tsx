@@ -3,7 +3,11 @@ import { useState, useEffect, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { toast } from 'sonner';
 
-function FiltersContent() {
+interface DashboardFiltersProps {
+  onOpenOrderDetails: (orderNo: string) => void;
+}
+
+function FiltersContent({ onOpenOrderDetails }: DashboardFiltersProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -17,8 +21,6 @@ function FiltersContent() {
   const [isSearching, setIsSearching] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   
-  // Modal State
-  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   
   const searchRef = useRef<HTMLDivElement>(null);
 
@@ -184,7 +186,7 @@ return (
                     <li 
                       key={result.orderNo} 
                       onClick={() => {
-                        setSelectedOrder(result);
+                        onOpenOrderDetails(result.orderNo);
                         setIsDropdownOpen(false);
                         setSearchQuery('');
                       }}
@@ -216,75 +218,14 @@ return (
         </button>
       </div>
 
-      {/* Order Details Modal Overlay */}
-      {selectedOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-[var(--color-brand-card)] w-full max-w-lg rounded-2xl shadow-2xl border border-[var(--color-brand-border)] overflow-hidden">
-            {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-[var(--color-brand-border)] flex justify-between items-center bg-gray-50/50">
-              <h3 className="text-lg font-bold text-[var(--color-brand-primary)]">Order Details</h3>
-              <button onClick={() => setSelectedOrder(null)} className="text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)] transition-colors p-1 rounded-md hover:bg-gray-200">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            
-            {/* Modal Body */}
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4 border-b border-[var(--color-brand-border)] pb-4">
-                <div>
-                  <p className="text-xs text-[var(--color-brand-muted)] uppercase tracking-wider mb-1">Order Number</p>
-                  {/* ONLY showing the number now, no '#' prefix */}
-                  <p className="font-semibold text-[var(--color-brand-primary)]">{selectedOrder.orderNo}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-[var(--color-brand-muted)] uppercase tracking-wider mb-1">Sale Date</p>
-                  <p className="font-semibold text-[var(--color-brand-primary)]">{selectedOrder.saleDate}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-xs text-[var(--color-brand-muted)] uppercase tracking-wider mb-1">Connected AWB(s)</p>
-                  <p className="font-mono text-sm bg-[var(--color-brand-background)] px-2 py-1 rounded inline-block text-[var(--color-brand-primary)]">{selectedOrder.awbNumbers}</p>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-[var(--color-brand-muted)]">Gross Sales</span>
-                  <span className="font-medium text-[var(--color-brand-primary)]">₹{selectedOrder.sales.toLocaleString('en-IN')}</span>
-                </div>
-                <div className="flex justify-between items-center text-red-500">
-                  <span className="text-sm">Material Cost</span>
-                  <span className="font-medium">-₹{selectedOrder.materialCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between items-center text-red-500 pb-3 border-b border-[var(--color-brand-border)]">
-                  <span className="text-sm">Allocated Duty (FedEx)</span>
-                  <span className="font-medium">-₹{selectedOrder.dutyCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between items-center pt-1">
-                  <span className="font-bold text-[var(--color-brand-primary)]">Direct NPF (Net Profit)</span>
-                  <span className={`font-bold text-lg ${selectedOrder.netProfit >= 0 ? 'text-[#184B4D]' : 'text-red-600'}`}>
-                    ₹{selectedOrder.netProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="px-6 py-4 bg-gray-50/50 border-t border-[var(--color-brand-border)] flex justify-end">
-              <button onClick={() => setSelectedOrder(null)} className="px-5 py-2 bg-[var(--color-brand-primary)] text-white text-sm font-semibold rounded-lg hover:bg-[#184B4D] shadow-sm transition-colors">
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
 
-export default function DashboardFilters() {
+export default function DashboardFilters({ onOpenOrderDetails }: DashboardFiltersProps) {
   return (
     <Suspense fallback={<div className="w-full h-14 bg-[var(--color-brand-card)] rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] animate-pulse mb-8"></div>}>
-      <FiltersContent />
+      <FiltersContent onOpenOrderDetails={onOpenOrderDetails} />
     </Suspense>
   );
 }

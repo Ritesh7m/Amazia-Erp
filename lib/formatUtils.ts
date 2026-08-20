@@ -7,10 +7,13 @@ export const formatDashboardDate = (dateStr: string | null | undefined): string 
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return 'Not synced yet';
 
-  const datePart = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  const timePart = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const dateOpts: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric', year: 'numeric' };
+  const timeOpts: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true };
 
-  return `${datePart} • ${timePart}`;
+  const datePart = new Intl.DateTimeFormat('en-US', dateOpts).format(d);
+  const timePart = new Intl.DateTimeFormat('en-US', timeOpts).format(d);
+
+  return `${datePart} • ${timePart} IST`;
 };
 
 /**

@@ -6,10 +6,10 @@ export const dynamic = 'force-dynamic';
 
 export async function POST() {
   try {
-    // 1. Read distinct order numbers from etsy_statement
+    // 1. Read distinct order numbers from etsy_sales
     const etsyOrders = await fetchQuery<{ order_no: string }>(`
       SELECT DISTINCT CAST(order_no AS VARCHAR) as order_no 
-      FROM etsy_statement
+      FROM etsy_sales
       WHERE order_no IS NOT NULL AND order_no != ''
     `);
 
@@ -23,7 +23,7 @@ export async function POST() {
         unmappedOrders: 0,
         failedOrders: 0,
         errors: [],
-        message: 'No orders found in etsy_statement to sync.',
+        message: 'No orders found in etsy_sales to sync.',
       });
     }
 

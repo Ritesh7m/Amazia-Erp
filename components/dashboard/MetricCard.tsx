@@ -50,7 +50,7 @@ export default function MetricCard({
 
   if (isLoading) {
     return (
-      <div className="bg-[var(--color-brand-card)] p-6 rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] shadow-sm animate-pulse flex flex-col justify-between min-h-[140px]">
+      <div className="bg-[var(--color-brand-card)] p-4 xl:p-5 rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] shadow-sm animate-pulse flex flex-col justify-between min-h-[130px]">
         <div className="h-4 bg-gray-200 rounded w-1/3 mb-4"></div>
         <div className="h-8 bg-gray-200 rounded w-1/2 mb-4"></div>
         <div className="h-3 bg-gray-200 rounded w-2/3 mt-auto"></div>
@@ -59,29 +59,32 @@ export default function MetricCard({
   }
 
   return (
-    <div className="bg-[var(--color-brand-card)] p-6 rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] shadow-sm flex flex-col justify-between min-h-[140px]">
+    <div className="bg-[var(--color-brand-card)] p-4 xl:p-5 rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] shadow-sm flex flex-col justify-between min-h-[130px]">
       <div className="flex justify-between items-start mb-2">
         <h3 className="text-sm font-semibold text-[var(--color-brand-muted)] tracking-wide">{title}</h3>
       </div>
       
       <div className="mb-3">
-        <span className="text-3xl font-bold text-[var(--color-brand-primary)]">
+        <span 
+          className="block text-2xl lg:text-[1.25rem] xl:text-[1.5rem] 2xl:text-3xl font-bold text-[var(--color-brand-primary)] tracking-tight tabular-nums whitespace-nowrap"
+          title={`${prefix}${formattedValue}${suffix}`}
+        >
           {prefix}{formattedValue}{suffix}
         </span>
       </div>
 
-      <div className="flex items-center text-xs mt-auto">
+      <div className="flex items-center text-xs mt-auto flex-wrap gap-1.5 xl:gap-2">
         {isNA ? (
-          <span className="flex items-center font-medium px-1.5 py-0.5 rounded-md bg-gray-100 text-[var(--color-brand-muted)]">
+          <span className="inline-flex items-center font-medium px-1.5 py-0.5 rounded-md bg-gray-100 text-[var(--color-brand-muted)]">
             N/A
           </span>
         ) : (
-          <span className={`flex items-center font-medium px-1.5 py-0.5 rounded-md ${bgColor} ${trendColor}`}>
+          <span className={`inline-flex items-center font-medium px-1.5 py-0.5 rounded-md ${bgColor} ${trendColor}`}>
             {ArrowIcon && <ArrowIcon />}
             {changePercentage}{isPercentagePoint ? 'pp' : '%'}
           </span>
         )}
-        <span className="text-[var(--color-brand-muted)] ml-2">{isNA ? 'No previous data' : comparisonText}</span>
+        <span className="text-[var(--color-brand-muted)] break-words min-w-[70px]">{isNA ? 'No previous data' : comparisonText}</span>
       </div>
     </div>
   );

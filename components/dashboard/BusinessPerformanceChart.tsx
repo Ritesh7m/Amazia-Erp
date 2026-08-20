@@ -97,7 +97,7 @@ export default function BusinessPerformanceChart({ data, isLoading }: { data: Ch
                 <div className="w-2 h-2 rounded-full bg-transparent" />
                 <span className="text-[var(--color-brand-muted)] font-medium">Margin</span>
               </div>
-              <span className="font-semibold text-[var(--color-brand-primary)]">{margin}%</span>
+              <span className="font-semibold text-[var(--color-brand-primary)]">{typeof margin === 'number' ? margin.toFixed(1) : margin}%</span>
             </div>
           </div>
         </div>
@@ -107,17 +107,17 @@ export default function BusinessPerformanceChart({ data, isLoading }: { data: Ch
   };
 
   return (
-    <div className="bg-[var(--color-brand-card)] p-6 rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] shadow-sm">
+    <div className="bg-[var(--color-brand-card)] p-6 rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] shadow-sm relative z-10" style={{ overflow: 'visible' }}>
       <div className="flex justify-between items-center mb-6">
         <h3 className="font-semibold text-[var(--color-brand-primary)]">Business Performance (Monthly)</h3>
       </div>
-      <div className="h-[300px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="h-[300px] w-full" style={{ overflow: 'visible' }}>
+        <ResponsiveContainer width="100%" height="100%" style={{ overflow: 'visible' }}>
           <ComposedChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E4D4BA" opacity={0.5} />
             <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#677072' }} dy={10} />
             <YAxis yAxisId="left" tickFormatter={formatIndianCurrencyCompact} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#677072' }} width={80} />
-            <Tooltip content={<CustomTooltip />} cursor={{fill: 'transparent'}} />
+            <Tooltip content={<CustomTooltip />} cursor={{fill: 'transparent'}} wrapperStyle={{ zIndex: 100, outline: 'none' }} />
             <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '20px' }} />
             
             <Bar yAxisId="left" dataKey="sales" name="Sales" fill="#4B8B84" radius={[4, 4, 0, 0]} barSize={20} isAnimationActive={false} />

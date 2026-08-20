@@ -32,7 +32,7 @@ export const processEtsyImport = async (
 
     // 1. Idempotency Check
     const existing = await fetchQuery<any>(
-      `SELECT id, status FROM import_history WHERE file_hash = ?`,
+      `SELECT id, status FROM etsy_imports WHERE file_hash = ?`,
       [fileHash]
     );
 
@@ -48,19 +48,19 @@ export const processEtsyImport = async (
         // Reuse the existing record if it failed previously
         importId = existing[0].id;
         const conn = await getConnection();
-        await executePreparedStatement(conn, `UPDATE import_history SET status = 'PROCESSING' WHERE id = ?`, [importId]);
+        await executePreparedStatement(conn, `UPDATE etsy_imports SET status = 'PROCESSING' WHERE id = ?`, [importId]);
         conn.close();
       }
     } else {
       const conn = await getConnection();
       const importInsertQuery = `
-        INSERT INTO import_history (
-          file_name, file_hash, file_size, status, invoice_type, total_rows, imported_rows, failed_rows, processing_time
+        INSERT INTO etsy_imports (
+          file_name, file_hash, file_size, status, total_rows, new_rows, duplicate_rows, failed_rows, processing_time_ms
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
       `;
       const importRes = await new Promise<any[]>((resolve, reject) => {
         conn.all(importInsertQuery, 
-          ...[fileName, fileHash, fileSize, 'PROCESSING', SUPPORTED_INVOICE_TYPES.ETSY, transactionRecords.length, 0, 0, 0], 
+          ...[fileName, fileHash, fileSize, 'PROCESSING', transactionRecords.length, 0, 0, 0, 0], 
           (err: any, rows: any) => err ? reject(err) : resolve(rows || [])
         );
       });
@@ -145,19 +145,20 @@ export const processEtsyImport = async (
       // 4. Update Import Record
       const processingTime = Date.now() - startTime;
       const updateImportQuery = `
-        UPDATE import_history 
-        SET status = 'SUCCESS', imported_rows = ?, failed_rows = 0, processing_time = ?
+        UPDATE etsy_imports 
+        SET status = 'SUCCESS', new_rows = ?, duplicate_rows = ?, failed_rows = 0, processing_time_ms = ?
         WHERE id = ?
       `;
+      const duplicateRows = transactionRecords.length - insertedCount;
       await executePreparedStatement(conn, updateImportQuery, [
-        insertedCount, processingTime, importId
+        insertedCount, duplicateRows, processingTime, importId
       ]);
       
       // 5. Update Sync Metadata
       const syncMetaQuery = `
         UPDATE sync_metadata 
         SET last_processed_row = ?, last_sync_at = CURRENT_TIMESTAMP
-        WHERE sync_name = 'etsy_statement'
+        WHERE sync_name = 'etsy'
       `;
       await executePreparedStatement(conn, syncMetaQuery, [insertedCount]);
       const grossSales = transactionRecords.filter(t => t.transaction_category === 'SALE').reduce((sum, t) => sum + (t.amount || 0), 0);
@@ -219,7 +220,7 @@ export const processEtsyImport = async (
     // Attempt to mark as FAILED
     try {
       const conn = await getConnection();
-      await executePreparedStatement(conn, `UPDATE import_history SET status = 'FAILED' WHERE file_hash = ?`, [fileHash]);
+      await executePreparedStatement(conn, `UPDATE etsy_imports SET status = 'FAILED' WHERE file_hash = ?`, [fileHash]);
       conn.close();
     } catch (e) {
       console.error('[Etsy Importer] Could not update failure status:', e);

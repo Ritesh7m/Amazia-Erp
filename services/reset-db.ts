@@ -12,17 +12,20 @@ const resetScript = `
   -- 1. DROP ALL EXISTING & LEGACY TABLES & VIEWS
   -- =================================================================
   
-  -- Drop missing views and tables identified from the database state
+  DROP VIEW IF EXISTS v_order_financials;
   DROP VIEW IF EXISTS v_order_etsy_allocations;
+  DROP VIEW IF EXISTS v_order_etsy_expenses;
+  DROP VIEW IF EXISTS v_order_fedex_cost;
+  DROP VIEW IF EXISTS v_order_material_cost;
+  DROP VIEW IF EXISTS v_order_refunds;
+  DROP VIEW IF EXISTS v_order_sales;
   DROP TABLE IF EXISTS etsy_allocation_batches;
   DROP TABLE IF EXISTS etsy_order_allocations;
 
   -- Drop existing tracked tables
   DROP TABLE IF EXISTS etsy_listing_allocations;
-  DROP TABLE IF EXISTS order_listing_allocations;
   DROP TABLE IF EXISTS etsy_expenses;
   DROP TABLE IF EXISTS etsy_sales;
-  DROP TABLE IF EXISTS etsy_statement;
   DROP TABLE IF EXISTS fedex_billing;
   DROP TABLE IF EXISTS inventory_table;
   DROP TABLE IF EXISTS sync_metadata;
@@ -34,12 +37,13 @@ const resetScript = `
   -- 2. DROP ALL LEGACY & CURRENT SEQUENCES
   -- =================================================================
   DROP SEQUENCE IF EXISTS seq_fedex_billing;
-  DROP SEQUENCE IF EXISTS seq_etsy_statement;
   DROP SEQUENCE IF EXISTS seq_etsy_sales;
   DROP SEQUENCE IF EXISTS seq_inventory_table;
   DROP SEQUENCE IF EXISTS seq_import_history;
   DROP SEQUENCE IF EXISTS seq_etsy_expenses;
   DROP SEQUENCE IF EXISTS seq_etsy_listing_allocs;
+  DROP SEQUENCE IF EXISTS seq_etsy_imports;
+  DROP SEQUENCE IF EXISTS seq_etsy_allocation_batches;
 
   -- =================================================================
   -- 3. CREATE FRESH SEQUENCES
@@ -47,17 +51,36 @@ const resetScript = `
   CREATE SEQUENCE seq_fedex_billing START 1;
   CREATE SEQUENCE seq_inventory_table START 1;
   CREATE SEQUENCE seq_import_history START 1;
+  CREATE SEQUENCE seq_etsy_imports START 1;
+  CREATE SEQUENCE seq_etsy_allocation_batches START 1;
 
   -- =================================================================
   -- 4. CREATE NEW SCHEMA TABLES
   -- =================================================================
 
-  -- File Ingestion & Audit Log
+  -- File Ingestion & Audit Log (FedEx/Global)
   CREATE TABLE import_history (
     id INTEGER DEFAULT nextval('seq_import_history') PRIMARY KEY,
     file_name VARCHAR, file_hash VARCHAR UNIQUE, file_size INTEGER, status VARCHAR,
     invoice_type VARCHAR, total_rows INTEGER, imported_rows INTEGER, failed_rows INTEGER,
     processing_time INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Etsy File Ingestion & Audit Log
+  CREATE TABLE etsy_imports (
+    id BIGINT DEFAULT nextval('seq_etsy_imports') PRIMARY KEY,
+    file_name VARCHAR NOT NULL,
+    file_hash VARCHAR NOT NULL UNIQUE,
+    file_size BIGINT,
+    statement_start_date DATE,
+    statement_end_date DATE,
+    total_rows INTEGER DEFAULT 0,
+    new_rows INTEGER DEFAULT 0,
+    duplicate_rows INTEGER DEFAULT 0,
+    failed_rows INTEGER DEFAULT 0,
+    processing_time_ms BIGINT DEFAULT 0,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
   -- Etsy Sales Ledger (Gross Revenue)
@@ -90,12 +113,24 @@ const resetScript = `
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- Order Listing Allocations Tracker (Prevents duplicate listing fee amortizations)
-  CREATE TABLE order_listing_allocations (
-    order_no VARCHAR PRIMARY KEY,
-    batch_reference VARCHAR,
+  -- Etsy Allocation Batches (Groups allocations by import)
+  CREATE TABLE etsy_allocation_batches (
+    allocation_batch_id VARCHAR PRIMARY KEY,
+    expense_type VARCHAR NOT NULL,
+    pool_amount DOUBLE NOT NULL,
+    eligible_order_count INTEGER NOT NULL,
     allocated_amount DOUBLE NOT NULL,
-    allocated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    status VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Etsy Order Allocations (Canonical allocation table)
+  CREATE TABLE etsy_order_allocations (
+    allocation_id VARCHAR PRIMARY KEY,
+    allocation_batch_id VARCHAR NOT NULL,
+    order_no VARCHAR NOT NULL,
+    amount DOUBLE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
   -- FedEx Billing Invoices
@@ -140,17 +175,48 @@ const resetScript = `
     PRIMARY KEY (order_no, awb_number)
   );
 
+  -- =================================================================
+  -- 5. CREATE VIEWS
+  -- =================================================================
+  CREATE VIEW v_order_sales AS SELECT order_no, COALESCE(sum(gross_amount), 0) AS sales FROM etsy_sales GROUP BY order_no;
+  
+  CREATE VIEW v_order_refunds AS SELECT order_no, COALESCE(sum(-(net_amount)), 0) AS refunds FROM etsy_expenses WHERE (expense_type = 'REFUND') GROUP BY order_no;
+  
+  CREATE VIEW v_order_material_cost AS SELECT order_no, COALESCE(sum(CASE  WHEN ((upper(material_type) = 'COTTON')) THEN ((quantity * 90)) ELSE (quantity * 100) END), 0) AS material_cost FROM inventory_table GROUP BY order_no;
+  
+  CREATE VIEW v_order_fedex_cost AS WITH awb_order_counts AS (SELECT awb_number, count(DISTINCT order_no) AS total_orders_in_awb FROM order_awb_mapping GROUP BY awb_number)SELECT m.order_no, sum((f.total_cost / c.total_orders_in_awb)) AS fedex_cost, sum((f.duty / c.total_orders_in_awb)) AS fedex_duty, sum((f.transportation_charges / c.total_orders_in_awb)) AS fedex_transportation, string_agg(DISTINCT m.awb_number, ', ') AS awb_numbers FROM order_awb_mapping AS m INNER JOIN fedex_billing AS f ON ((trim(CAST(m.awb_number AS VARCHAR)) = trim(CAST(f.awb_number AS VARCHAR)))) INNER JOIN awb_order_counts AS c ON ((trim(CAST(m.awb_number AS VARCHAR)) = trim(CAST(c.awb_number AS VARCHAR)))) GROUP BY m.order_no;
+  
+  CREATE VIEW v_order_etsy_expenses AS SELECT order_no, COALESCE(sum(CASE  WHEN ((expense_type = 'TDS')) THEN (-(net_amount)) ELSE 0 END), 0) AS tds, COALESCE(sum(CASE  WHEN ((expense_type = 'TCS')) THEN (-(net_amount)) ELSE 0 END), 0) AS tcs, COALESCE(sum(CASE  WHEN ((expense_type = 'TRANSACTION_FEE')) THEN (-(net_amount)) ELSE 0 END), 0) AS transaction_fee, COALESCE(sum(CASE  WHEN ((expense_type = 'PROCESSING_FEE')) THEN (-(net_amount)) ELSE 0 END), 0) AS processing_fee, COALESCE(sum(CASE  WHEN ((expense_type = 'SALES_TAX')) THEN (-(net_amount)) ELSE 0 END), 0) AS sales_tax, COALESCE(sum(CASE  WHEN ((expense_type = 'REGULATORY_FEE')) THEN (-(net_amount)) ELSE 0 END), 0) AS regulatory_fee, COALESCE(sum(CASE  WHEN ((expense_type = 'BUYER_FEE')) THEN (-(net_amount)) ELSE 0 END), 0) AS buyer_fee, COALESCE(sum(CASE  WHEN ((expense_type = 'OFFSITE_ADS')) THEN (-(net_amount)) ELSE 0 END), 0) AS offsite_ads, COALESCE(sum(-(net_amount)), 0) AS total_order_etsy_expenses FROM etsy_expenses WHERE ((order_no IS NOT NULL) AND (order_no != '') AND (expense_type != 'REFUND') AND (is_allocation = CAST('f' AS BOOLEAN))) GROUP BY order_no;
+  
+  CREATE VIEW v_order_etsy_allocations AS SELECT order_no, COALESCE(sum(CASE  WHEN ((b.expense_type = 'LISTING_FEE')) THEN (a.amount) ELSE 0 END), 0) AS etsy_listing_expense, COALESCE(sum(CASE  WHEN ((b.expense_type = 'ETSY_ADS')) THEN (a.amount) ELSE 0 END), 0) AS etsy_ads_expense, COALESCE(sum(a.amount), 0) AS total_allocated_expenses FROM etsy_order_allocations AS a INNER JOIN etsy_allocation_batches AS b ON ((a.allocation_batch_id = b.allocation_batch_id)) GROUP BY order_no;
+  
+  CREATE VIEW v_order_financials AS WITH all_orders AS ((SELECT order_no, sale_date FROM etsy_sales) UNION ALL (SELECT order_no, expense_date AS sale_date FROM etsy_expenses WHERE ((order_no IS NOT NULL) AND (order_no != '')))), unique_orders AS (SELECT order_no, min(sale_date) AS sale_date FROM all_orders GROUP BY order_no)SELECT o.order_no, o.sale_date, COALESCE(s.sales, 0) AS sales, COALESCE(r.refunds, 0) AS refunds, COALESCE(m.material_cost, 0) AS material_cost, COALESCE(f.fedex_cost, 0) AS fedex_cost, COALESCE(f.fedex_duty, 0) AS fedex_duty, COALESCE(f.fedex_transportation, 0) AS fedex_transportation, COALESCE(f.awb_numbers, 'N/A') AS awb_numbers, COALESCE(a.etsy_listing_expense, 0) AS etsy_listing_expense, COALESCE(a.etsy_ads_expense, 0) AS etsy_ads_expense, COALESCE(a.total_allocated_expenses, 0) AS total_allocated_expenses, COALESCE(e.tds, 0) AS tds, COALESCE(e.tcs, 0) AS tcs, COALESCE(e.transaction_fee, 0) AS transaction_fee, COALESCE(e.processing_fee, 0) AS processing_fee, COALESCE(e.sales_tax, 0) AS sales_tax, COALESCE(e.regulatory_fee, 0) AS regulatory_fee, COALESCE(e.buyer_fee, 0) AS buyer_fee, COALESCE(e.offsite_ads, 0) AS offsite_ads, COALESCE(e.total_order_etsy_expenses, 0) AS order_etsy_expenses, (COALESCE(e.total_order_etsy_expenses, 0) + COALESCE(a.total_allocated_expenses, 0)) AS etsy_expenses, (((COALESCE(m.material_cost, 0) + COALESCE(f.fedex_cost, 0)) + COALESCE(e.total_order_etsy_expenses, 0)) + COALESCE(a.total_allocated_expenses, 0)) AS total_expense, ((COALESCE(s.sales, 0) - COALESCE(r.refunds, 0)) - (((COALESCE(m.material_cost, 0) + COALESCE(f.fedex_cost, 0)) + COALESCE(e.total_order_etsy_expenses, 0)) + COALESCE(a.total_allocated_expenses, 0))) AS profit, CASE  WHEN (((COALESCE(s.sales, 0) - COALESCE(r.refunds, 0)) > 0)) THEN (((((COALESCE(s.sales, 0) - COALESCE(r.refunds, 0)) - (((COALESCE(m.material_cost, 0) + COALESCE(f.fedex_cost, 0)) + COALESCE(e.total_order_etsy_expenses, 0)) + COALESCE(a.total_allocated_expenses, 0))) / (COALESCE(s.sales, 0) - COALESCE(r.refunds, 0))) * 100)) ELSE 0 END AS margin, (COALESCE(s.sales, 0) - COALESCE(r.refunds, 0)) AS net_sales FROM unique_orders AS o LEFT JOIN v_order_sales AS s ON ((o.order_no = s.order_no)) LEFT JOIN v_order_refunds AS r ON ((o.order_no = r.order_no)) LEFT JOIN v_order_material_cost AS m ON ((o.order_no = m.order_no)) LEFT JOIN v_order_fedex_cost AS f ON ((o.order_no = f.order_no)) LEFT JOIN v_order_etsy_expenses AS e ON ((o.order_no = e.order_no)) LEFT JOIN v_order_etsy_allocations AS a ON ((o.order_no = a.order_no));
+
   -- Initialize sync metadata baseline
   INSERT INTO sync_metadata (sync_name, last_processed_row, last_sync_at)
   VALUES 
-    ('etsy_statement', 0, NULL),
+    ('etsy', 0, NULL),
     ('fedex_billing', 0, NULL),
     ('google_sheets_inventory', 0, NULL);
 `;
 
-db.exec(resetScript, (err) => {
-  if (err) {
-    console.error('❌ Error resetting database schema:', err);
+const statements = resetScript.split(';').map(s => s.trim()).filter(s => s.length > 0);
+
+db.serialize(() => {
+  let hasError = false;
+  
+  for (let i = 0; i < statements.length; i++) {
+    const stmt = statements[i];
+    try {
+      db.exec(stmt);
+    } catch (err) {
+      console.error(`❌ Error executing statement:\n${stmt}\n`, err);
+      hasError = true;
+      break;
+    }
+  }
+
+  if (hasError) {
     process.exit(1);
   } else {
     console.log('✅ Database reset successfully! Normalized tables and sequences initialized.');
