@@ -327,34 +327,26 @@ export class OrderFinancialService {
    * Fetch detailed sync statuses for various providers.
    */
   static async getSyncStatuses(): Promise<SyncStatuses> {
-    const etsySuccess = await fetchQuery<any>(`SELECT MAX(created_at) AS last_sync_at FROM etsy_imports WHERE status = 'SUCCESS'`);
-    const fedexSuccess = await fetchQuery<any>(`SELECT MAX(created_at) AS last_sync_at FROM import_history WHERE invoice_type = 'FEDEX' AND status = 'SUCCESS'`);
+    const etsySuccess = await fetchQuery<any>(`SELECT MAX(completed_at) AS last_sync_at FROM etsy_imports WHERE status = 'COMPLETED'`);
     
-    // Also fetch from sync_metadata as fallback
-    const syncMetaEtsy = await fetchQuery<any>(`SELECT last_sync_at FROM sync_metadata WHERE sync_name = 'etsy'`);
+    // Fetch from sync_metadata
     const syncMetaFedex = await fetchQuery<any>(`SELECT last_sync_at FROM sync_metadata WHERE sync_name = 'fedex_billing'`);
     const inventoryQuery = await fetchQuery<any>(`SELECT last_sync_at FROM sync_metadata WHERE sync_name = 'google_sheets_inventory'`);
 
     const etsyLatest = await fetchQuery<any>(`SELECT status FROM etsy_imports ORDER BY created_at DESC LIMIT 1`);
-    const fedexLatest = await fetchQuery<any>(`SELECT status FROM import_history WHERE invoice_type = 'FEDEX' ORDER BY created_at DESC LIMIT 1`);
 
     const inventoryDate = inventoryQuery[0]?.last_sync_at || null;
-    const etsyDate = etsySuccess[0]?.last_sync_at || syncMetaEtsy[0]?.last_sync_at || null;
-    const fedexDate = fedexSuccess[0]?.last_sync_at || syncMetaFedex[0]?.last_sync_at || null;
+    const etsyDate = etsySuccess[0]?.last_sync_at || null;
+    const fedexDate = syncMetaFedex[0]?.last_sync_at || null;
 
     const etsyLatestStatus = etsyLatest[0]?.status;
-    const fedexLatestStatus = fedexLatest[0]?.status;
 
     let etsyStatus: SyncStatusItem['status'] = 'NOT_SYNCED';
     if (etsyLatestStatus === 'PROCESSING') etsyStatus = 'PROCESSING';
     else if (etsyLatestStatus === 'FAILED') etsyStatus = 'FAILED';
     else if (etsyDate) etsyStatus = 'SYNCED';
 
-    let fedexStatus: SyncStatusItem['status'] = 'NOT_SYNCED';
-    if (fedexLatestStatus === 'PROCESSING') fedexStatus = 'PROCESSING';
-    else if (fedexLatestStatus === 'FAILED') fedexStatus = 'FAILED';
-    else if (fedexDate) fedexStatus = 'SYNCED';
-
+    let fedexStatus: SyncStatusItem['status'] = fedexDate ? 'SYNCED' : 'NOT_SYNCED';
     let inventoryStatus: SyncStatusItem['status'] = inventoryDate ? 'SYNCED' : 'NOT_SYNCED';
 
     const overall = (etsyDate && fedexDate && inventoryDate) ? 'SYNCED' : 'PENDING';
@@ -384,11 +376,11 @@ export class OrderFinancialService {
       SELECT 'Etsy Statement' as source, 'imported' as action, status, COALESCE(new_rows, 0) as rowsProcessed, created_at as timestamp 
       FROM etsy_imports 
       UNION ALL
-      SELECT 'FedEx Billing' as source, 'imported' as action, status, imported_rows as rowsProcessed, created_at as timestamp 
-      FROM import_history WHERE invoice_type = 'FEDEX'
+      SELECT 'FedEx Billing' as source, 'synchronized' as action, 'COMPLETED' as status, last_processed_row as rowsProcessed, last_sync_at as timestamp 
+      FROM sync_metadata WHERE sync_name = 'fedex_billing' AND last_sync_at IS NOT NULL
       UNION ALL
-      SELECT 'Inventory Sheet' as source, 'synchronized' as action, 'SUCCESS' as status, 0 as rowsProcessed, last_sync_at as timestamp 
-      FROM sync_metadata WHERE sync_name = 'inventory' AND last_sync_at IS NOT NULL
+      SELECT 'Inventory Sheet' as source, 'synchronized' as action, 'COMPLETED' as status, 0 as rowsProcessed, last_sync_at as timestamp 
+      FROM sync_metadata WHERE sync_name = 'google_sheets_inventory' AND last_sync_at IS NOT NULL
       ORDER BY timestamp DESC
       LIMIT ? OFFSET ?
     `;

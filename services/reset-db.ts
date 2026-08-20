@@ -23,6 +23,7 @@ const resetScript = `
   DROP TABLE IF EXISTS etsy_order_allocations;
 
   -- Drop existing tracked tables
+  DROP TABLE IF EXISTS etsy_imports;
   DROP TABLE IF EXISTS etsy_listing_allocations;
   DROP TABLE IF EXISTS etsy_expenses;
   DROP TABLE IF EXISTS etsy_sales;
@@ -30,6 +31,7 @@ const resetScript = `
   DROP TABLE IF EXISTS inventory_table;
   DROP TABLE IF EXISTS sync_metadata;
   DROP TABLE IF EXISTS import_history;
+  DROP TABLE IF EXISTS etsy_statement;
   DROP TABLE IF EXISTS order_awb_mapping;
   DROP TABLE IF EXISTS shipment_order_mapping;
 
@@ -39,7 +41,6 @@ const resetScript = `
   DROP SEQUENCE IF EXISTS seq_fedex_billing;
   DROP SEQUENCE IF EXISTS seq_etsy_sales;
   DROP SEQUENCE IF EXISTS seq_inventory_table;
-  DROP SEQUENCE IF EXISTS seq_import_history;
   DROP SEQUENCE IF EXISTS seq_etsy_expenses;
   DROP SEQUENCE IF EXISTS seq_etsy_listing_allocs;
   DROP SEQUENCE IF EXISTS seq_etsy_imports;
@@ -50,7 +51,6 @@ const resetScript = `
   -- =================================================================
   CREATE SEQUENCE seq_fedex_billing START 1;
   CREATE SEQUENCE seq_inventory_table START 1;
-  CREATE SEQUENCE seq_import_history START 1;
   CREATE SEQUENCE seq_etsy_imports START 1;
   CREATE SEQUENCE seq_etsy_allocation_batches START 1;
 
@@ -58,20 +58,12 @@ const resetScript = `
   -- 4. CREATE NEW SCHEMA TABLES
   -- =================================================================
 
-  -- File Ingestion & Audit Log (FedEx/Global)
-  CREATE TABLE import_history (
-    id INTEGER DEFAULT nextval('seq_import_history') PRIMARY KEY,
-    file_name VARCHAR, file_hash VARCHAR UNIQUE, file_size INTEGER, status VARCHAR,
-    invoice_type VARCHAR, total_rows INTEGER, imported_rows INTEGER, failed_rows INTEGER,
-    processing_time INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
   -- Etsy File Ingestion & Audit Log
   CREATE TABLE etsy_imports (
     id BIGINT DEFAULT nextval('seq_etsy_imports') PRIMARY KEY,
     file_name VARCHAR NOT NULL,
     file_hash VARCHAR NOT NULL UNIQUE,
-    file_size BIGINT,
+    file_size BIGINT NOT NULL,
     statement_start_date DATE,
     statement_end_date DATE,
     total_rows INTEGER DEFAULT 0,
@@ -80,7 +72,9 @@ const resetScript = `
     failed_rows INTEGER DEFAULT 0,
     processing_time_ms BIGINT DEFAULT 0,
     status VARCHAR NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    error_message VARCHAR
   );
 
   -- Etsy Sales Ledger (Gross Revenue)
@@ -195,7 +189,6 @@ const resetScript = `
   -- Initialize sync metadata baseline
   INSERT INTO sync_metadata (sync_name, last_processed_row, last_sync_at)
   VALUES 
-    ('etsy', 0, NULL),
     ('fedex_billing', 0, NULL),
     ('google_sheets_inventory', 0, NULL);
 `;
@@ -208,11 +201,15 @@ db.serialize(() => {
   for (let i = 0; i < statements.length; i++) {
     const stmt = statements[i];
     try {
-      db.exec(stmt);
+      db.exec(stmt, (err) => {
+        if (err) {
+          console.error(`❌ Error executing statement:\n${stmt}\n`, err);
+          hasError = true;
+        }
+      });
     } catch (err) {
       console.error(`❌ Error executing statement:\n${stmt}\n`, err);
       hasError = true;
-      break;
     }
   }
 

@@ -14,14 +14,15 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
   const [isUploadOpen, setIsUploadOpen] = useState(true);
   const [isCollapsed, setIsCollapsed] = useState(false);
   
-  const [syncDates, setSyncDates] = useState({
-    overall: 'PENDING',
-    etsy: { status: 'NOT_SYNCED', lastSyncAt: null as string | null }, 
-    fedex: { status: 'NOT_SYNCED', lastSyncAt: null as string | null }, 
-    inventory: { status: 'NOT_SYNCED', lastSyncAt: null as string | null } 
-  });
+  const [syncDates, setSyncDates] = useState<{
+    overall: string | null;
+    etsy: { status: string | null, lastSyncAt: string | null };
+    fedex: { status: string | null, lastSyncAt: string | null };
+    inventory: { status: string | null, lastSyncAt: string | null };
+  } | null>(null);
 
-  const renderStatus = (item: { status: string, lastSyncAt: string | null }) => {
+  const renderStatus = (item?: { status: string | null, lastSyncAt: string | null }) => {
+    if (!item || item.status === null) return 'Loading...';
     if (item.status === 'PROCESSING') return 'Sync in progress...';
     if (item.status === 'FAILED') return 'Last sync failed';
     if (item.status === 'SYNCED') return formatDashboardDate(item.lastSyncAt);
@@ -120,7 +121,7 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
         {!isCollapsed && (
           <div className="p-4 mx-4 mb-4 bg-[var(--color-brand-background)] rounded-[var(--radius-xl)] border border-[var(--color-brand-border)]">
             <h3 className="text-xs font-semibold text-[var(--color-brand-muted)] uppercase tracking-wider mb-3">Last Sync Status</h3>
-            {syncDates.overall === 'SYNCED' ? (
+            {syncDates?.overall === 'SYNCED' ? (
               <div className="flex items-center text-sm text-[var(--color-brand-primary)] font-medium mb-4">
                 <div className="w-2 h-2 rounded-full bg-green-500 mr-2"></div>
                 All data synchronized
@@ -128,22 +129,22 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
             ) : (
               <div className="flex items-center text-sm text-[var(--color-brand-muted)] font-medium mb-4">
                 <div className="w-2 h-2 rounded-full bg-yellow-500 mr-2"></div>
-                Sync pending
+                {syncDates ? 'Sync pending' : 'Loading...'}
               </div>
             )}
             
             <div className="space-y-3">
               <div>
                 <div className="text-sm font-medium flex items-center gap-2 text-[var(--color-brand-primary)]">Etsy Statement</div>
-                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates.etsy)}</div>
+                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates?.etsy)}</div>
               </div>
               <div>
                 <div className="text-sm font-medium flex items-center gap-2 text-[var(--color-brand-primary)]">FedEx Billing</div>
-                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates.fedex)}</div>
+                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates?.fedex)}</div>
               </div>
               <div>
                 <div className="text-sm font-medium flex items-center gap-2 text-[var(--color-brand-primary)]">Inventory Sheet</div>
-                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates.inventory)}</div>
+                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates?.inventory)}</div>
               </div>
             </div>
           </div>

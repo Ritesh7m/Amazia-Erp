@@ -4,16 +4,30 @@
  */
 export const formatDashboardDate = (dateStr: string | null | undefined): string => {
   if (!dateStr) return 'Not synced yet';
-  const d = new Date(dateStr);
+  // If dateStr lacks timezone, append Z to ensure UTC interpretation
+  const safeDateStr = (!dateStr.includes('Z') && !dateStr.includes('+')) ? dateStr + 'Z' : dateStr;
+  const d = new Date(safeDateStr);
   if (isNaN(d.getTime())) return 'Not synced yet';
 
-  const dateOpts: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric', year: 'numeric' };
-  const timeOpts: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true };
+  let formatted = new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(d);
 
-  const datePart = new Intl.DateTimeFormat('en-US', dateOpts).format(d);
-  const timePart = new Intl.DateTimeFormat('en-US', timeOpts).format(d);
+  // en-IN usually formats as "20 Aug 2026, 5:22 pm"
+  // Normalize to "20 Aug 2026 • 05:22 PM IST"
+  formatted = formatted.replace(',', ' •').toUpperCase();
+  
+  if (!formatted.includes('IST')) {
+    formatted += ' IST';
+  }
 
-  return `${datePart} • ${timePart} IST`;
+  return formatted;
 };
 
 /**

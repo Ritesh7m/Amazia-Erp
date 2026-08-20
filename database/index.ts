@@ -161,13 +161,6 @@ export const executeTransaction = async <T>(
 
 export const initializeDatabase = async (): Promise<void> => {
   const schemaQueries = [
-    `CREATE SEQUENCE IF NOT EXISTS seq_import_history;`,
-    `CREATE TABLE IF NOT EXISTS import_history (
-      id INTEGER DEFAULT nextval('seq_import_history') PRIMARY KEY,
-      file_name VARCHAR, file_hash VARCHAR UNIQUE, file_size INTEGER, status VARCHAR,
-      invoice_type VARCHAR, total_rows INTEGER, imported_rows INTEGER, failed_rows INTEGER,
-      processing_time INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );`,
     
     `CREATE SEQUENCE IF NOT EXISTS seq_fedex_billing;`,
     `CREATE TABLE IF NOT EXISTS fedex_billing (
@@ -183,13 +176,6 @@ export const initializeDatabase = async (): Promise<void> => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );`,
     
-    `CREATE SEQUENCE IF NOT EXISTS seq_etsy_statement;`,
-    `CREATE TABLE IF NOT EXISTS etsy_statement (
-      id INTEGER DEFAULT nextval('seq_etsy_statement') PRIMARY KEY,
-      order_no VARCHAR, date DATE, type VARCHAR, net_amt DECIMAL(15, 2),
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(order_no, date, net_amt, type)
-    );`,
 
     // --- Inventory Sync Tables ---
     `CREATE TABLE IF NOT EXISTS sync_metadata (
@@ -214,7 +200,6 @@ export const initializeDatabase = async (): Promise<void> => {
     // Initialize the sync trackers safely with NULL timestamps
     `INSERT INTO sync_metadata (sync_name, last_processed_row, last_sync_at) 
      VALUES 
-       ('etsy_statement', 0, NULL),
        ('fedex_billing', 0, NULL),
        ('google_sheets_inventory', 0, NULL)
      ON CONFLICT (sync_name) DO NOTHING;`,
@@ -234,18 +219,20 @@ export const initializeDatabase = async (): Promise<void> => {
     `CREATE SEQUENCE IF NOT EXISTS seq_etsy_imports;`,
     `CREATE TABLE IF NOT EXISTS etsy_imports (
       id BIGINT DEFAULT nextval('seq_etsy_imports') PRIMARY KEY,
-      file_name VARCHAR,
-      file_hash VARCHAR UNIQUE,
-      file_size INTEGER,
+      file_name VARCHAR NOT NULL,
+      file_hash VARCHAR NOT NULL UNIQUE,
+      file_size BIGINT NOT NULL,
       statement_start_date DATE,
       statement_end_date DATE,
-      total_rows INTEGER,
-      new_rows INTEGER,
-      duplicate_rows INTEGER,
-      failed_rows INTEGER,
-      processing_time_ms INTEGER,
-      status VARCHAR,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      total_rows INTEGER DEFAULT 0,
+      new_rows INTEGER DEFAULT 0,
+      duplicate_rows INTEGER DEFAULT 0,
+      failed_rows INTEGER DEFAULT 0,
+      processing_time_ms BIGINT DEFAULT 0,
+      status VARCHAR NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP,
+      error_message VARCHAR
     );`,
 
     `CREATE TABLE IF NOT EXISTS etsy_sales (

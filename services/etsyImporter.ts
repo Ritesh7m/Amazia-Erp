@@ -39,7 +39,7 @@ export const processEtsyImport = async (
     let importId: number;
 
     if (existing && existing.length > 0) {
-      if (existing[0].status === 'SUCCESS') {
+      if (existing[0].status === 'COMPLETED') {
         return {
           status: HTTP_STATUS.CONFLICT,
           data: { success: true, message: 'This file has already been successfully imported.' }
@@ -144,23 +144,17 @@ export const processEtsyImport = async (
 
       // 4. Update Import Record
       const processingTime = Date.now() - startTime;
-      const updateImportQuery = `
+      const duplicateRows = transactionRecords.length - insertedCount;
+      const finalUpdateQuery = `
         UPDATE etsy_imports 
-        SET status = 'SUCCESS', new_rows = ?, duplicate_rows = ?, failed_rows = 0, processing_time_ms = ?
+        SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP, total_rows = ?, new_rows = ?, duplicate_rows = ?, failed_rows = ?, processing_time_ms = ?
         WHERE id = ?
       `;
-      const duplicateRows = transactionRecords.length - insertedCount;
-      await executePreparedStatement(conn, updateImportQuery, [
-        insertedCount, duplicateRows, processingTime, importId
+      await executePreparedStatement(conn, finalUpdateQuery, [
+        transactionRecords.length, insertedCount, duplicateRows, 0, processingTime, importId
       ]);
       
-      // 5. Update Sync Metadata
-      const syncMetaQuery = `
-        UPDATE sync_metadata 
-        SET last_processed_row = ?, last_sync_at = CURRENT_TIMESTAMP
-        WHERE sync_name = 'etsy'
-      `;
-      await executePreparedStatement(conn, syncMetaQuery, [insertedCount]);
+
       const grossSales = transactionRecords.filter(t => t.transaction_category === 'SALE').reduce((sum, t) => sum + (t.amount || 0), 0);
       const refunds = transactionRecords.filter(t => t.transaction_category === 'REFUND').reduce((sum, t) => sum + -(t.net_amount || 0), 0);
       const netSales = grossSales - refunds;
@@ -220,7 +214,8 @@ export const processEtsyImport = async (
     // Attempt to mark as FAILED
     try {
       const conn = await getConnection();
-      await executePreparedStatement(conn, `UPDATE etsy_imports SET status = 'FAILED' WHERE file_hash = ?`, [fileHash]);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      await executePreparedStatement(conn, `UPDATE etsy_imports SET status = 'FAILED', error_message = ? WHERE file_hash = ?`, [errorMsg, fileHash]);
       conn.close();
     } catch (e) {
       console.error('[Etsy Importer] Could not update failure status:', e);
