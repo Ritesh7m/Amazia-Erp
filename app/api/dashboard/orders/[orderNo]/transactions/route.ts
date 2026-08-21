@@ -38,6 +38,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ orde
       totalExpense: Number(s.total_expense || 0),
       netProfit: Number(s.profit || 0),
       profitMargin: Number(s.margin || 0),
+      awbNumbers: s.awb_numbers || 'N/A',
       breakdown: {
         listingExpense: Number(s.etsy_listing_expense || 0),
         etsyAds: Number(s.etsy_ads_expense || 0),

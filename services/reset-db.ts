@@ -33,6 +33,7 @@ const resetScript = `
   DROP TABLE IF EXISTS import_history;
   DROP TABLE IF EXISTS etsy_statement;
   DROP TABLE IF EXISTS order_awb_mapping;
+  DROP TABLE IF EXISTS order_fedex_allocations;
   DROP TABLE IF EXISTS shipment_order_mapping;
 
   -- =================================================================
@@ -130,14 +131,12 @@ const resetScript = `
   -- FedEx Billing Invoices
   CREATE TABLE fedex_billing (
     id INTEGER PRIMARY KEY DEFAULT nextval('seq_fedex_billing'),
-    invoice_number VARCHAR,
-    awb_number VARCHAR,
-    shipment_date DATE,
-    transportation_charges DECIMAL(15, 2),
-    duty DECIMAL(15, 2),
-    taxes DECIMAL(15, 2),
-    other_charges DECIMAL(15, 2),
-    total_cost DECIMAL(15, 2),
+    invoice_type VARCHAR,
+    invoice_date DATE,
+    due_date DATE,
+    awb_number VARCHAR NOT NULL,
+    air_waybill_total_amount DECIMAL(15, 2),
+    file_hash VARCHAR,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -169,6 +168,15 @@ const resetScript = `
     PRIMARY KEY (order_no, awb_number)
   );
 
+  -- Deterministic FedEx allocations
+  CREATE TABLE order_fedex_allocations (
+    order_no VARCHAR NOT NULL,
+    awb_number VARCHAR NOT NULL,
+    allocated_cost DECIMAL(15, 2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (order_no, awb_number)
+  );
+
   -- =================================================================
   -- 5. CREATE VIEWS
   -- =================================================================
@@ -178,7 +186,39 @@ const resetScript = `
   
   CREATE VIEW v_order_material_cost AS SELECT order_no, COALESCE(sum(CASE  WHEN ((upper(material_type) = 'COTTON')) THEN ((quantity * 90)) ELSE (quantity * 100) END), 0) AS material_cost FROM inventory_table GROUP BY order_no;
   
-  CREATE VIEW v_order_fedex_cost AS WITH awb_order_counts AS (SELECT awb_number, count(DISTINCT order_no) AS total_orders_in_awb FROM order_awb_mapping GROUP BY awb_number)SELECT m.order_no, sum((f.total_cost / c.total_orders_in_awb)) AS fedex_cost, sum((f.duty / c.total_orders_in_awb)) AS fedex_duty, sum((f.transportation_charges / c.total_orders_in_awb)) AS fedex_transportation, string_agg(DISTINCT m.awb_number, ', ') AS awb_numbers FROM order_awb_mapping AS m INNER JOIN fedex_billing AS f ON ((trim(CAST(m.awb_number AS VARCHAR)) = trim(CAST(f.awb_number AS VARCHAR)))) INNER JOIN awb_order_counts AS c ON ((trim(CAST(m.awb_number AS VARCHAR)) = trim(CAST(c.awb_number AS VARCHAR)))) GROUP BY m.order_no;
+  CREATE VIEW v_order_fedex_cost AS 
+    WITH awb_cost AS (
+        SELECT
+            awb_number,
+            SUM(
+                COALESCE(air_waybill_total_amount, 0) * 18.0 / 118.0
+            ) AS awb_cost
+        FROM fedex_billing
+        GROUP BY awb_number
+    ),
+    awb_order_count AS (
+        SELECT
+            awb_number,
+            COUNT(DISTINCT order_no) AS mapped_order_count
+        FROM order_awb_mapping
+        GROUP BY awb_number
+    )
+    SELECT 
+        m.order_no,
+        SUM(
+            c.awb_cost / NULLIF(o.mapped_order_count, 0)
+        ) AS fedex_cost,
+        CAST(0 AS DECIMAL(15,2)) AS fedex_duty,
+        CAST(0 AS DECIMAL(15,2)) AS fedex_transportation,
+        string_agg(DISTINCT m.awb_number, ', ') AS awb_numbers,
+        COUNT(DISTINCT m.awb_number) AS awb_count,
+        SUM(1) AS matched_awb_count,
+        0 AS unmatched_awb_count,
+        'MATCHED' AS fedex_match_status
+    FROM order_awb_mapping m
+    LEFT JOIN awb_cost c ON c.awb_number = m.awb_number
+    LEFT JOIN awb_order_count o ON o.awb_number = m.awb_number
+    GROUP BY m.order_no;
   
   CREATE VIEW v_order_etsy_expenses AS SELECT order_no, COALESCE(sum(CASE  WHEN ((expense_type = 'TDS')) THEN (-(net_amount)) ELSE 0 END), 0) AS tds, COALESCE(sum(CASE  WHEN ((expense_type = 'TCS')) THEN (-(net_amount)) ELSE 0 END), 0) AS tcs, COALESCE(sum(CASE  WHEN ((expense_type = 'TRANSACTION_FEE')) THEN (-(net_amount)) ELSE 0 END), 0) AS transaction_fee, COALESCE(sum(CASE  WHEN ((expense_type = 'PROCESSING_FEE')) THEN (-(net_amount)) ELSE 0 END), 0) AS processing_fee, COALESCE(sum(CASE  WHEN ((expense_type = 'SALES_TAX')) THEN (-(net_amount)) ELSE 0 END), 0) AS sales_tax, COALESCE(sum(CASE  WHEN ((expense_type = 'REGULATORY_FEE')) THEN (-(net_amount)) ELSE 0 END), 0) AS regulatory_fee, COALESCE(sum(CASE  WHEN ((expense_type = 'BUYER_FEE')) THEN (-(net_amount)) ELSE 0 END), 0) AS buyer_fee, COALESCE(sum(CASE  WHEN ((expense_type = 'OFFSITE_ADS')) THEN (-(net_amount)) ELSE 0 END), 0) AS offsite_ads, COALESCE(sum(-(net_amount)), 0) AS total_order_etsy_expenses FROM etsy_expenses WHERE ((order_no IS NOT NULL) AND (order_no != '') AND (expense_type != 'REFUND') AND (is_allocation = CAST('f' AS BOOLEAN))) GROUP BY order_no;
   

@@ -26,10 +26,17 @@ export default function MetricCard({
   comparisonText = 'vs previous period',
   isPercentagePoint = false
 }: MetricCardProps) {
-  // Format numbers to Indian standard (e.g. 12,45,680)
-  const formattedValue = typeof value === 'number' 
-    ? new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 }).format(value)
-    : value;
+  // Format numbers based on type
+  let formattedValue = value;
+  if (typeof value === 'number') {
+    if (suffix === '%') {
+      formattedValue = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 3 }).format(value);
+    } else if (prefix === '₹') {
+      formattedValue = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(value);
+    } else {
+      formattedValue = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 }).format(value);
+    }
+  }
 
   // Determine trend colors and icons
   let trendColor = 'text-[var(--color-brand-muted)]';

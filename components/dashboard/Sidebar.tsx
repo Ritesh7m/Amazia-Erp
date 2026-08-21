@@ -29,14 +29,19 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
     return 'Not synced yet';
   };
 
-  // 2. Fetch the dates when the sidebar loads
+  // 2. Fetch the dates when the sidebar loads and poll for updates
   useEffect(() => {
-    fetch('/api/dashboard/sync-status')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) setSyncDates(data.data);
-      })
-      .catch(() => {});
+    const fetchStatus = () => {
+      fetch('/api/dashboard/sync-status')
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) setSyncDates(data.data);
+        })
+        .catch(() => {});
+    };
+    fetchStatus();
+    const intervalId = setInterval(fetchStatus, 15000); // Poll every 15s
+    return () => clearInterval(intervalId);
   }, []);
 
   const isActive = (path: string) => pathname === path || pathname?.startsWith(`${path}/`);

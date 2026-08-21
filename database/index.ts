@@ -52,10 +52,20 @@ export const getConnection = async (): Promise<duckdb.Connection> => {
 };
 
 export const closeConnection = async (): Promise<void> => {
+  if (globalThis.__duckdbDbPromise) {
+    const db = await globalThis.__duckdbDbPromise;
+    return new Promise((resolve, reject) => {
+      db.close((err: any) => {
+        globalThis.__duckdbDbPromise = undefined;
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
   return Promise.resolve();
 };
 
-const executeQuery = async (query: string): Promise<void> => {
+export const executeQuery = async (query: string): Promise<void> => {
   const conn = await getConnection();
   return new Promise((resolve, reject) => {
     conn.run(query, (err: Error | null) => {
@@ -165,15 +175,30 @@ export const initializeDatabase = async (): Promise<void> => {
     `CREATE SEQUENCE IF NOT EXISTS seq_fedex_billing;`,
     `CREATE TABLE IF NOT EXISTS fedex_billing (
       id INTEGER DEFAULT nextval('seq_fedex_billing') PRIMARY KEY,
-      invoice_number VARCHAR,
-      awb_number VARCHAR,
-      shipment_date DATE,
-      transportation_charges DECIMAL(15, 2),
-      duty DECIMAL(15, 2),
-      taxes DECIMAL(15, 2),
-      other_charges DECIMAL(15, 2),
-      total_cost DECIMAL(15, 2),
+      invoice_type VARCHAR,
+      invoice_date DATE,
+      due_date DATE,
+      awb_number VARCHAR NOT NULL,
+      air_waybill_total_amount DECIMAL(15, 2),
+      file_hash VARCHAR,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );`,
+    
+    `ALTER TABLE fedex_billing ADD COLUMN IF NOT EXISTS file_hash VARCHAR;`,
+    
+    // --- Backup Audit Table ---
+    `CREATE TABLE IF NOT EXISTS backup_history (
+      backup_id VARCHAR PRIMARY KEY,
+      file_name VARCHAR,
+      started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP,
+      status VARCHAR NOT NULL,
+      source_size BIGINT,
+      backup_size BIGINT,
+      local_path VARCHAR,
+      drive_file_id VARCHAR,
+      error_message VARCHAR,
+      retry_count INTEGER DEFAULT 0
     );`,
     
 
@@ -208,8 +233,16 @@ export const initializeDatabase = async (): Promise<void> => {
 
     // --- Order AWB Mapping Table ---
     `CREATE TABLE IF NOT EXISTS order_awb_mapping (
-      order_no VARCHAR,
-      awb_number VARCHAR,
+      order_no VARCHAR NOT NULL,
+      awb_number VARCHAR NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (order_no, awb_number)
+    );`,
+
+    `CREATE TABLE IF NOT EXISTS order_fedex_allocations (
+      order_no VARCHAR NOT NULL,
+      awb_number VARCHAR NOT NULL,
+      allocated_cost DECIMAL(15, 2) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (order_no, awb_number)
     );`,
@@ -331,20 +364,18 @@ export const initializeDatabase = async (): Promise<void> => {
       GROUP BY order_no;`,
 
     `CREATE OR REPLACE VIEW v_order_fedex_cost AS
-      WITH awb_order_counts AS (
-        SELECT awb_number, COUNT(DISTINCT order_no) as total_orders_in_awb
-        FROM order_awb_mapping
-        GROUP BY awb_number
-      )
       SELECT 
         m.order_no,
-        SUM(f.total_cost / c.total_orders_in_awb) as fedex_cost,
-        SUM(f.duty / c.total_orders_in_awb) as fedex_duty,
-        SUM(f.transportation_charges / c.total_orders_in_awb) as fedex_transportation,
-        STRING_AGG(DISTINCT m.awb_number, ', ') as awb_numbers
+        SUM(a.allocated_cost) as fedex_cost,
+        CAST(0 AS DECIMAL(15,2)) as fedex_duty,
+        CAST(0 AS DECIMAL(15,2)) as fedex_transportation,
+        STRING_AGG(DISTINCT m.awb_number, ', ') as awb_numbers,
+        COUNT(DISTINCT m.awb_number) as awb_count,
+        SUM(1) as matched_awb_count,
+        0 as unmatched_awb_count,
+        'MATCHED' as fedex_match_status
       FROM order_awb_mapping m
-      JOIN fedex_billing f ON TRIM(CAST(m.awb_number AS VARCHAR)) = TRIM(CAST(f.awb_number AS VARCHAR))
-      JOIN awb_order_counts c ON TRIM(CAST(m.awb_number AS VARCHAR)) = TRIM(CAST(c.awb_number AS VARCHAR))
+      LEFT JOIN order_fedex_allocations a ON m.order_no = a.order_no AND m.awb_number = a.awb_number
       GROUP BY m.order_no;`,
 
     `CREATE OR REPLACE VIEW v_order_financials AS

@@ -15,14 +15,25 @@ function buildMaterialCostExpr(): string {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-
     const query = searchParams.get('q');
 
     if (!query || query.length < 2) {
       return NextResponse.json({ data: [] });
     }
 
-    const searchValue = `%${query.trim()}%`;
+    let orderNoQuery = query;
+    let awbQuery = query;
+
+    if (query.startsWith('#')) {
+      orderNoQuery = query.substring(1);
+      awbQuery = 'NOT_MATCHING_ANYTHING_UNLESS_ORDER';
+    } else if (query.toUpperCase().startsWith('AWB-')) {
+      awbQuery = query.substring(4);
+      orderNoQuery = 'NOT_MATCHING_ANYTHING_UNLESS_AWB';
+    }
+
+    const orderSearchValue = `%${orderNoQuery.trim()}%`;
+    const awbSearchValue = `%${awbQuery.trim()}%`;
     const costExpr = buildMaterialCostExpr();
 
     const sqlQuery = `
@@ -55,7 +66,7 @@ export async function GET(request: Request) {
       LIMIT 6
     `;
 
-    const rows = await fetchQuery<any>(sqlQuery, [searchValue, searchValue]);
+    const rows = await fetchQuery<any>(sqlQuery, [orderSearchValue, awbSearchValue]);
 
     const data = rows.map((row: any) => {
       const sales = Number(row.sales ?? 0);

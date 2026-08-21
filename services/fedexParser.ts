@@ -14,16 +14,15 @@ export const parseFedexCsv = async (buffer: Buffer): Promise<FedexRecord[]> => {
         mapHeaders: ({ header }) => header.trim()
       }))
       .on('data', (data) => {
-        const invoiceType = data['Invoice Type'];
-        const invoiceDate = data['Invoice Date'];
-        const dueDate = data['Due Date'];
-        const awb = data['Air Waybill Number'];
-        const amountRaw = data['Air Waybill Total Amount'];
+        const invoiceType = data['Invoice Type'] || data['Invoice'];
+        const invoiceDate = data['Invoice Date'] || data['Date'];
+        const dueDate = data['Due Date'] || '';
+        const awb = data['Air Waybill Number'] || data['AWB'] || data['Tracking Number'] || data['Air Waybill'] || data['Tracking ID'];
+        const totalRaw = data['Air Waybill Total Amount'] || data['Total Amount'] || data['Total Charge'] || data['Amount Due'];
 
-        if (!invoiceType && !awb && !amountRaw) return;
+        if (!invoiceDate && !awb && !totalRaw) return;
 
-        const amount = normalizeAmount(amountRaw);
-        const bookExpenseCost = calculateBookExpenseCost(amount);
+        const total = normalizeAmount(totalRaw);
 
         // Fix Excel's scientific notation corruption (converts "8.90E+11" back to "890000000000")
         let formattedAwb = awb ? String(awb).trim() : '';
@@ -36,8 +35,7 @@ export const parseFedexCsv = async (buffer: Buffer): Promise<FedexRecord[]> => {
           invoice_date: normalizeDate(invoiceDate) || '',
           due_date: normalizeDate(dueDate) || '',
           awb_number: formattedAwb,
-          air_waybill_total_amount: amount,
-          book_expense_cost: bookExpenseCost
+          air_waybill_total_amount: total
         });
       })
       .on('end', () => resolve(results))

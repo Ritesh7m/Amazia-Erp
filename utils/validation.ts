@@ -4,12 +4,11 @@ import { z } from 'zod';
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
 export const fedexRowSchema = z.object({
-  invoice_type: z.string().min(1, "Invoice Type is required"),
-  invoice_date: z.string().regex(dateRegex, "Invalid Invoice Date"),
-  due_date: z.string().regex(dateRegex, "Invalid Due Date"),
+  invoice_type: z.string(),
+  invoice_date: z.string().regex(dateRegex, "Invalid Invoice Date").or(z.string().length(0)),
+  due_date: z.string().regex(dateRegex, "Invalid Due Date").or(z.string().length(0)),
   awb_number: z.string().min(1, "AWB Number is required"),
-  air_waybill_total_amount: z.number(),
-  book_expense_cost: z.number()
+  air_waybill_total_amount: z.number()
 });
 
 export const etsyRowSchema = z.object({

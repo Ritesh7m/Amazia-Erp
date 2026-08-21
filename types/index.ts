@@ -54,7 +54,6 @@ export interface FedexRecord {
   due_date: string;
   awb_number: string;
   air_waybill_total_amount: number;
-  book_expense_cost: number;
   created_at?: Date;
 }
 

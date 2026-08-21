@@ -5,7 +5,17 @@ import { fetchNewInventoryRows } from './googleSheets';
 import { processAndAggregateInventory } from './inventoryProcessor';
 
 
+declare global {
+  var __isInventorySyncRunning: boolean | undefined;
+}
+
 export const runInventorySync = async () => {
+  if (globalThis.__isInventorySyncRunning) {
+    console.log('[Scheduler] ⚠️ Inventory Sync is already running. Skipping this cycle.');
+    return { success: false, message: 'Sync already in progress.' };
+  }
+  globalThis.__isInventorySyncRunning = true;
+
   const startTime = Date.now();
   console.log('-----------------------------------');
   console.log('[Scheduler]  Started Inventory Sync');
@@ -39,9 +49,10 @@ export const runInventorySync = async () => {
     if (validRecords.length === 0) {
       const conn = await getConnection();
       await executePreparedStatement(conn, 
-        `UPDATE sync_metadata SET last_processed_row = ?, last_sync_at = now() WHERE sync_name = 'google_sheets_inventory'`,
-        [maxRowIndex]
+        `UPDATE sync_metadata SET last_processed_row = ?, last_sync_at = ? WHERE sync_name = 'google_sheets_inventory'`,
+        [maxRowIndex, new Date().toISOString()]
       );
+      globalThis.__isInventorySyncRunning = false;
       return { success: true, message: 'Processed rows, but all were skipped.' };
     }
 // 4. Database Transaction (Bulk UPSERT via Chunked SQL)
@@ -87,10 +98,10 @@ export const runInventorySync = async () => {
       // Update Metadata
       const updateMetadataQuery = `
         UPDATE sync_metadata 
-        SET last_processed_row = ?, last_sync_at = now() 
+        SET last_processed_row = ?, last_sync_at = ? 
         WHERE sync_name = 'google_sheets_inventory'
       `;
-      await executePreparedStatement(conn, updateMetadataQuery, [maxRowIndex]);
+      await executePreparedStatement(conn, updateMetadataQuery, [maxRowIndex, new Date().toISOString()]);
     });
 
     const transactionTime = Date.now() - transactionStartTime;
@@ -109,6 +120,7 @@ export const runInventorySync = async () => {
     console.log(`   - final status: SUCCESS`);
     console.log('-----------------------------------');
 
+    globalThis.__isInventorySyncRunning = false;
     return { success: true, aggregatedRows: validRecords.length, skipped: skippedCount };
 
   } catch (error: any) {
@@ -118,6 +130,7 @@ export const runInventorySync = async () => {
     console.log(`   - duration: ${totalTime}ms`);
     console.log(`   - final status: FAILED`);
     console.error('[Scheduler] Sync Failed. Transaction Rolled Back.', error?.message || error);
+    globalThis.__isInventorySyncRunning = false;
     throw error;
   }
 };

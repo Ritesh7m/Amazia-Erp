@@ -90,7 +90,17 @@ export default function OrderDetailsModal({ orderNo, onClose }: OrderDetailsModa
               </div>
               <div className="bg-[var(--color-brand-background)]/30 p-3 rounded-lg border border-[var(--color-brand-border)]/50">
                 <div className="text-[10px] text-[var(--color-brand-muted)] uppercase tracking-wider font-semibold mb-1">Connected AWB(s)</div>
-                <div className="font-mono text-sm inline-block text-[var(--color-brand-primary)] truncate max-w-full" title={data.summary.awbNumbers || 'N/A'}>{data.summary.awbNumbers || 'N/A'}</div>
+                {data.summary.awbNumbers && data.summary.awbNumbers !== 'N/A' ? (
+                  <div className="flex flex-col gap-1 mt-1">
+                    {data.summary.awbNumbers.split(',').map((awb: string) => awb.trim()).filter(Boolean).map((awb: string) => (
+                      <span key={awb} className="font-mono text-[11px] font-medium bg-[var(--color-brand-background)] px-2 py-0.5 rounded border border-[var(--color-brand-border)]/80 text-[var(--color-brand-primary)] w-max">
+                        {awb}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="font-mono text-sm inline-block text-[var(--color-brand-primary)] mt-1">N/A</div>
+                )}
               </div>
               <div className="bg-[var(--color-brand-background)]/30 p-3 rounded-lg border border-[var(--color-brand-border)]/50 col-span-2 md:col-span-2 flex justify-between items-center">
                 <div>

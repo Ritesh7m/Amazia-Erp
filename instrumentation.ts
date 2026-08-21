@@ -46,6 +46,7 @@ export async function register() {
           console.error("[Scheduler] Inventory sync failed:", err);
         }
       },
+
       { timezone: "Asia/Kolkata" }
     );
 

@@ -20,6 +20,14 @@ export interface AwbOrdersResponseData {
   shipments: ShipmentDetail[];
 }
 
+export interface DashboardShipmentsResponse {
+  data: {
+    ordersToAWBMappingObj?: Record<string, string[]>;
+    awbToOrderMappingObj?: Record<string, string[]>;
+    [key: string]: any;
+  }
+}
+
 const DEFAULT_TIMEOUT_MS = 30000;
 
 class ShipmentApiService {
@@ -287,6 +295,43 @@ class ShipmentApiService {
       return {
         success: false,
         message: error?.message || `AWB ${awbNumber}: Shipment service unavailable`,
+      };
+    }
+  }
+  /**
+   * Fetch shipments for dashboard to get orderToAwbs and awbToOrders mapping.
+   */
+  async getDashboardShipments(from: string, to: string): Promise<{ success: boolean; data?: DashboardShipmentsResponse['data']; message?: string }> {
+    try {
+      const query = new URLSearchParams({ from, to, groupBy: 'month' }).toString();
+      const response = await this.fetchWithAuth(`/api/dashboard/shipments?${query}`, 'dashboard_shipments');
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        return {
+          success: false,
+          message: `External Shipment API error (${response.status}): ${errText || response.statusText}`,
+        };
+      }
+
+      const json = await response.json();
+
+      if (!json || !json.data) {
+        return {
+          success: false,
+          message: 'Invalid response from shipment API',
+        };
+      }
+
+      return {
+        success: true,
+        data: json.data,
+      };
+    } catch (error: any) {
+      console.error(`Error fetching dashboard shipments:`, error?.message || error);
+      return {
+        success: false,
+        message: error?.message || `Shipment service unavailable`,
       };
     }
   }
