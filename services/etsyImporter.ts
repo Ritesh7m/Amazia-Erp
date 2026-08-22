@@ -154,6 +154,15 @@ export const processEtsyImport = async (
         transactionRecords.length, insertedCount, duplicateRows, 0, processingTime, importId
       ]);
       
+      const syncMetaQuery = `
+        INSERT INTO sync_metadata (sync_name, last_processed_row, last_sync_at) 
+        VALUES ('etsy_statement', ?, CURRENT_TIMESTAMP) 
+        ON CONFLICT (sync_name) 
+        DO UPDATE SET 
+            last_processed_row = excluded.last_processed_row, 
+            last_sync_at = excluded.last_sync_at;
+      `;
+      await executePreparedStatement(conn, syncMetaQuery, [transactionRecords.length]);
 
       const grossSales = transactionRecords.filter(t => t.transaction_category === 'SALE').reduce((sum, t) => sum + (t.amount || 0), 0);
       const refunds = transactionRecords.filter(t => t.transaction_category === 'REFUND').reduce((sum, t) => sum + -(t.net_amount || 0), 0);

@@ -95,12 +95,12 @@ Amazia ERP uses **DuckDB** as its embedded analytical database.
 
 ### Core Tables
 
-- `etsy_statement`
+- `etsy_sales/etsy_expenses`
 - `fedex_billing`
 - `inventory_table`
-- `shipment_order_mapping`
+- `order_awb_mapping`
 - `sync_metadata`
-- `import_history`
+- `etsy_imports`
 
 For complete database schema and table documentation, refer to:
 

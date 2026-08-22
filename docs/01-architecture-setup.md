@@ -45,7 +45,7 @@ Amazia ERP uses **DuckDB**. Data imported from Etsy Statements, FedEx Billing CS
 
 The core tables responsible for reconciliation include:
 
-### **`etsy_statement`**
+### **`etsy_sales/etsy_expenses`**
 Stores sales transaction data imported from Etsy Statement CSV files.
 
 **Key Fields:**
@@ -90,7 +90,7 @@ The scheduler normalizes Order IDs, aggregates quantities, calculates material c
 
 ---
 
-### **`shipment_order_mapping`**
+### **`order_awb_mapping`**
 Maintains the relationship between Etsy Orders and FedEx Air Waybill (AWB) numbers, enabling accurate shipping cost allocation and financial reconciliation.
 
 ---
@@ -100,5 +100,5 @@ Tracks the last processed Google Sheet row and synchronization timestamp to supp
 
 ---
 
-### **`import_history`**
+### **`etsy_imports`**
 Stores audit information for every Etsy and FedEx import, including processing time, imported rows, failed rows, and error details.

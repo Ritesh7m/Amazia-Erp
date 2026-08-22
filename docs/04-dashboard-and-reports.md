@@ -14,7 +14,7 @@ database/AmaziaERP.db
 
 # Database Tables
 
-## 1. Etsy Statement (`etsy_statement`)
+## 1. Etsy Statement (`etsy_sales/etsy_expenses`)
 
 Stores all Etsy sales transactions.
 
@@ -63,7 +63,7 @@ Stores synchronized inventory data.
 
 ---
 
-## 4. Import History (`import_history`)
+## 4. Import History (`etsy_imports`)
 
 Stores CSV upload history.
 
@@ -106,7 +106,7 @@ Tracks inventory synchronization.
         ┌─────────────────┴────────────────┐
         │                                  │
         ▼                                  ▼
- etsy_statement                     fedex_billing
+ etsy_sales/etsy_expenses                     fedex_billing
    (Sales Data)                  (Shipping Expenses)
         │
         ▼
@@ -125,7 +125,7 @@ Calculates total sales within a selected date range.
 ```sql
 SELECT
     COALESCE(SUM(net_amt), 0) AS total_sales
-FROM etsy_statement
+FROM etsy_sales/etsy_expenses
 WHERE date >= ?
   AND date <= ?;
 ```
@@ -153,7 +153,7 @@ Material cost is calculated using the inventory quantity and the configured mate
 ```sql
 SELECT
     COALESCE(SUM(i.quantity * ?), 0) AS total_material_cost
-FROM etsy_statement e
+FROM etsy_sales/etsy_expenses e
 JOIN inventory_table i
 ON e.order_no = i.order_no
 WHERE e.date >= ?
@@ -170,7 +170,7 @@ Used by the Business Performance chart.
 SELECT
     strftime(date, '%Y-%m') AS month,
     SUM(net_amt) AS total
-FROM etsy_statement
+FROM etsy_sales/etsy_expenses
 WHERE date >= ?
 AND date <= ?
 GROUP BY month
@@ -200,7 +200,7 @@ ORDER BY month;
 SELECT
     strftime(e.date, '%Y-%m') AS month,
     SUM(i.quantity * ?) AS total
-FROM etsy_statement e
+FROM etsy_sales/etsy_expenses e
 JOIN inventory_table i
 ON e.order_no = i.order_no
 WHERE e.date >= ?
@@ -219,7 +219,7 @@ SELECT
     e.date,
     e.net_amt,
     SUM(i.quantity * ?) AS material_cost
-FROM etsy_statement e
+FROM etsy_sales/etsy_expenses e
 LEFT JOIN inventory_table i
 ON e.order_no = i.order_no
 GROUP BY
@@ -249,7 +249,7 @@ FROM sync_metadata;
 SELECT
     invoice_type,
     MAX(created_at) AS last_import_at
-FROM import_history
+FROM etsy_imports
 WHERE status = 'SUCCESS'
 GROUP BY invoice_type;
 ```
@@ -263,7 +263,7 @@ The dashboard computes all financial metrics using imported data.
 ## Sales
 
 ```text
-Sales = SUM(etsy_statement.net_amt)
+Sales = SUM(etsy_sales/etsy_expenses.net_amt)
 ```
 
 ## Material Cost
@@ -314,7 +314,7 @@ Sales
                Parse & Validate CSV
                         │
                         ▼
-              Store in etsy_statement
+              Store in etsy_sales/etsy_expenses
                         │
                         │
                FedEx Billing CSV

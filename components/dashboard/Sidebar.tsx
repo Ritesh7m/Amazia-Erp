@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { formatDashboardDate } from '@/lib/formatUtils';
+import { format } from 'date-fns';
 
 interface SidebarProps {
   isMobileOpen: boolean;
@@ -25,7 +25,13 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
     if (!item || item.status === null) return 'Loading...';
     if (item.status === 'PROCESSING') return 'Sync in progress...';
     if (item.status === 'FAILED') return 'Last sync failed';
-    if (item.status === 'SYNCED') return formatDashboardDate(item.lastSyncAt);
+    if (item.status === 'SYNCED' && item.lastSyncAt) {
+      try {
+        return format(new Date(item.lastSyncAt), "dd MMM yyyy • hh:mm a 'IST'").toUpperCase();
+      } catch (e) {
+        return 'Invalid date';
+      }
+    }
     return 'Not synced yet';
   };
 

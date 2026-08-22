@@ -86,7 +86,7 @@ function FiltersContent({ onOpenOrderDetails }: DashboardFiltersProps) {
     return () => clearTimeout(debounceTimer);
   }, [searchQuery]);
 
-  const handleDateRangeChange = (range: string) => {
+  function handleDateRangeChange(range: string) {
     setActiveRange(range);
     const to = new Date();
     let from = new Date();

@@ -327,16 +327,15 @@ export class OrderFinancialService {
    * Fetch detailed sync statuses for various providers.
    */
   static async getSyncStatuses(): Promise<SyncStatuses> {
-    const etsySuccess = await fetchQuery<any>(`SELECT MAX(completed_at) AS last_sync_at FROM etsy_imports WHERE status = 'COMPLETED'`);
-    
     // Fetch from sync_metadata
     const syncMetaFedex = await fetchQuery<any>(`SELECT last_sync_at FROM sync_metadata WHERE sync_name = 'fedex_billing'`);
     const inventoryQuery = await fetchQuery<any>(`SELECT last_sync_at FROM sync_metadata WHERE sync_name = 'google_sheets_inventory'`);
+    const syncMetaEtsy = await fetchQuery<any>(`SELECT last_sync_at FROM sync_metadata WHERE sync_name = 'etsy_statement'`);
 
     const etsyLatest = await fetchQuery<any>(`SELECT status FROM etsy_imports ORDER BY created_at DESC LIMIT 1`);
 
     const inventoryDate = inventoryQuery[0]?.last_sync_at || null;
-    const etsyDate = etsySuccess[0]?.last_sync_at || null;
+    const etsyDate = syncMetaEtsy[0]?.last_sync_at || null;
     const fedexDate = syncMetaFedex[0]?.last_sync_at || null;
 
     const etsyLatestStatus = etsyLatest[0]?.status;

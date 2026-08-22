@@ -58,7 +58,7 @@ multipart/form-data
 
 **Purpose**
 
-Imports Etsy Statement CSV files, extracts Order Numbers, normalizes data, and stores processed records in the `etsy_statement` table.
+Imports Etsy Statement CSV files, extracts Order Numbers, normalizes data, and stores processed records in the `etsy_sales/etsy_expenses` table.
 
 **Response**
 
@@ -361,7 +361,4 @@ Validation or processing errors return:
 | Dashboard | GET | `/api/dashboard/search` | Order & AWB search |
 | Dashboard | GET | `/api/dashboard/export` | Export financial report |
 | Dashboard | GET | `/api/dashboard/sync-status` | Inventory sync status |
-| Shipments | GET | `/api/shipments/orders/{orderNo}` | Shipment details by Order |
-| Shipments | GET | `/api/shipments/awb/{awbNumber}` | Shipment details by AWB |
-| Shipments | GET | `/api/shipments/sync` | Shipment synchronization |
 | Inventory | GET | `/api/inventory/sync` | Google Sheets inventory synchronization |

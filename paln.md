@@ -1,1299 +1,843 @@
-# AMAZIA ERP — PRODUCTION FEDEX MAPPING + COST FLOW
-# FINAL IMPLEMENTATION TASK
+Act as a Senior Next.js / TypeScript / DuckDB Production Engineer and Codebase Architect.
 
-Act as a Senior Backend/Full-Stack Engineer specializing in:
-- Next.js App Router
-- TypeScript
-- DuckDB
-- REST API integrations
-- Data pipelines
-- Financial calculations
-- Production-grade error handling
+The Amazia ERP project is now functionally complete.
 
-============================================================
-IMPORTANT CURRENT STATE
-============================================================
-
-The following flows are already working and MUST NOT be broken:
-
-1. Etsy Statement flow
-2. Google Sheets Inventory flow
-3. Dashboard financial calculations
-4. Order search
-5. Order details
-
-We are now implementing/replacing ONLY the FedEx Billing flow.
-
-The current database already contains FedEx billing records such as:
-
-    invoice_type
-    invoice_date
-    due_date
-    awb_number
-    air_waybill_total_amount
-    file_hash
-    created_at
-
-The current problem is:
-
-    fedex_billing
-        contains data
-
-but:
-
-    order_awb_mapping
-        is empty
-
-Therefore the missing pipeline is:
-
-    FedEx Billing
-        ↓
-    Shipment API
-        ↓
-    orderToAwbs / awbToOrders
-        ↓
-    order_awb_mapping
-        ↓
-    FedEx Cost Allocation
-        ↓
-    Order Financials
-        ↓
-    Dashboard
-
-============================================================
-1. DO NOT MAKE ME MANUALLY CALL EXTERNAL APIs
-============================================================
-
-The user must NOT have to manually call:
-
-    POST /api/auth/login
-
-or:
-
-    GET /api/dashboard/shipments
-
-during normal application operation.
-
-The Next.js backend must automatically perform both calls.
-
-However, create ONE internal endpoint that can be manually triggered for retry/recovery:
-
-    POST /api/fedex/sync-mapping
-
-This endpoint belongs to Amazia ERP.
-
-Example:
-
-    curl -X POST http://localhost:3000/api/fedex/sync-mapping
-
-This is ONLY a manual/admin recovery mechanism.
-
-Normal production flow must be:
-
-    User uploads FedEx CSV
-            ↓
-    FedEx CSV processing
-            ↓
-    FedEx mapping sync automatically starts
-            ↓
-    External API login
-            ↓
-    External shipment API
-            ↓
-    Save mappings
-            ↓
-    Calculate FedEx cost
-            ↓
-    Dashboard updated
-
-============================================================
-2. ENVIRONMENT VARIABLES
-============================================================
-
-Do NOT hardcode external API credentials in TypeScript/JavaScript.
-
-Add:
-
-    SHIPMENT_API_BASE_URL=http://100.125.123.94:4000
-    SHIPMENT_API_USERNAME=ops
-    SHIPMENT_API_PASSWORD=123
-
-Use:
-
-    process.env.SHIPMENT_API_BASE_URL
-    process.env.SHIPMENT_API_USERNAME
-    process.env.SHIPMENT_API_PASSWORD
-
-Never expose these values to the frontend.
-
-Never send the external password to the browser.
-
-Never log the password.
-
-Never log the JWT token.
-
-============================================================
-3. EXTERNAL AUTHENTICATION
-============================================================
-
-The backend must automatically call:
-
-    POST {SHIPMENT_API_BASE_URL}/api/auth/login
-
-Body:
-
-    {
-      "username": process.env.SHIPMENT_API_USERNAME,
-      "password": process.env.SHIPMENT_API_PASSWORD
-    }
-
-Expected behavior:
-
-    login
-      ↓
-    receive token
-      ↓
-    use token for shipment request
-
-The token must remain server-side.
-
-Create a reusable service such as:
-
-    lib/services/shipment-api.ts
-
-or an equivalent service according to the existing project architecture.
-
-Do NOT put external API logic directly inside React components.
-
-============================================================
-4. SHIPMENT ENDPOINT
-============================================================
-
-After login, call:
-
-    GET {SHIPMENT_API_BASE_URL}/api/dashboard/shipments
-
-with:
-
-    Authorization: Bearer <TOKEN>
-
-Example:
-
-    /api/dashboard/shipments
-      ?from=2026-01-01T00:00:00%2B05:30
-      &to=2027-01-01T00:00:00%2B05:30
-      &groupBy=month
-
-Do NOT hardcode this date range.
-
-============================================================
-5. DETERMINE DATE RANGE FROM FEDEX DATA
-============================================================
-
-The mapping request must be based on the relevant FedEx billing dataset.
-
-Read the FedEx billing records from DuckDB.
-
-Determine:
-
-    earliest relevant date
-    latest relevant date
-
-Then create:
-
-    from = earliest date at 00:00:00 +05:30
-
-    to = day after latest date at 00:00:00 +05:30
-
-Remember:
-
-    from = inclusive
-    to   = exclusive
-
-Example:
-
-    minimum date = 2026-04-01
-    maximum date = 2026-04-30
-
-Request:
-
-    from = 2026-04-01T00:00:00+05:30
-    to   = 2026-05-01T00:00:00+05:30
-
-Do not unnecessarily request an entire year if the uploaded FedEx file covers only a smaller period.
-
-============================================================
-6. EXTERNAL API RESPONSE
-============================================================
-
-The shipment API response contains:
-
-    data.filters
-    data.summary
-    data.series
-    data.orderToAwbs
-    data.awbToOrders
-    data.shipments
-    data.pagination
-
-The mapping pipeline must process:
-
-    orderToAwbs
-
-AND:
-
-    awbToOrders
-
-Example:
-
-    orderToAwbs:
-
-    {
-      "4104705089": [
-        "873549431322"
-      ],
-
-      "4104705090": [
-        "873549431322"
-      ],
-
-      "4104705091": [
-        "873549431322"
-      ],
-
-      "4104705092": [
-        "873549431400",
-        "873549431401"
-      ]
-    }
-
-Reverse mapping:
-
-    awbToOrders:
-
-    {
-      "873549431322": [
-        "4104705089",
-        "4104705090",
-        "4104705091"
-      ],
-
-      "873549431400": [
-        "4104705092"
-      ],
-
-      "873549431401": [
-        "4104705092"
-      ]
-    }
-
-Do not assume the response always contains every key.
-
-Safely handle:
-
-    missing
-    null
-    empty
-    malformed
-    unexpected values
-
-============================================================
-7. NORMALIZE THE MAPPING
-============================================================
-
-Convert the API response into normalized relationships:
-
-    order_no
-    awb_number
-
-Example:
-
-    4104705089 | 873549431322
-    4104705090 | 873549431322
-    4104705091 | 873549431322
-    4104705092 | 873549431400
-    4104705092 | 873549431401
-
-The normalized mapping must support:
-
-    One Order → One AWB
-
-    One Order → Multiple AWBs
-
-    One AWB → Multiple Orders
-
-    Many Orders ↔ Many AWBs
-
-============================================================
-8. DATABASE TABLE
-============================================================
-
-Use:
-
-    order_awb_mapping
-
-as the authoritative Order ↔ AWB relationship table.
-
-Required conceptual structure:
-
-    order_awb_mapping
-    -------------------------
-    order_no
-    awb_number
-    created_at
-
-The relationship must be unique by:
-
-    (order_no, awb_number)
-
-Do NOT make:
-
-    order_no
-
-the only primary key.
-
-Do NOT make:
-
-    awb_number
-
-the only primary key.
-
-An AWB can belong to multiple orders.
-
-An order can have multiple AWBs.
-
-Use:
-
-    PRIMARY KEY(order_no, awb_number)
-
-or an equivalent UNIQUE constraint.
-
-============================================================
-9. SAFE UPSERT
-============================================================
-
-The mapping sync must be idempotent.
-
-If the API returns:
-
-    4104705089 → 873549431322
-
-multiple times, the database must still contain only one relationship.
-
-Use an appropriate DuckDB-safe:
-
-    INSERT ... ON CONFLICT DO NOTHING
-
-or equivalent implementation.
-
-Repeated sync must NOT duplicate mappings.
-
-============================================================
-10. VERIFY BOTH DIRECTIONS
-============================================================
-
-Use both:
-
-    orderToAwbs
-
-and:
-
-    awbToOrders
-
-to validate the external response.
-
-Example:
-
-If:
-
-    orderToAwbs["4104705089"]
-    =
-    ["873549431322"]
-
-then:
-
-    awbToOrders["873549431322"]
-
-should contain:
-
-    "4104705089"
-
-If they disagree:
-
-    log the inconsistency
-
-but do NOT invent a relationship.
-
-Do not silently hide mapping inconsistencies.
-
-============================================================
-11. FEDEX BILLING TABLE
-============================================================
-
-The FedEx billing table should contain only required fields.
-
-Required:
-
-    id
-    invoice_type
-    invoice_date
-    due_date
-    awb_number
-    air_waybill_total_amount
-    file_hash
-    created_at
-
-Do not keep obsolete FedEx columns unless repository inspection proves they are required.
-
-The billing cost is:
-
-    air_waybill_total_amount
-
-============================================================
-12. BOOK EXPENSE COST
-============================================================
-
-The existing accounting formula is:
-
-    Book Expense Cost =
-    Amount × 18 / 118
-
-Example:
-
-    Amount = ₹1,180
-
-    Book Expense Cost =
-    1180 × 18 / 118
-    =
-    ₹180
+I want you to perform a COMPLETE PRODUCTION CLEANUP and RESTRUCTURING of the entire project.
 
 IMPORTANT:
 
-Book Expense Cost is NOT an additional FedEx expense.
+DO NOT blindly delete files.
 
-Do NOT calculate:
+First inspect the entire repository and understand how the application works.
 
-    FedEx Expense = Amount + Book Expense Cost
+Your goal is:
 
-That would double count the expense.
-
-The actual FedEx cost remains:
-
-    air_waybill_total_amount
-
-Book Expense Cost must not be separately added to:
-
-    Total Expenses
-    FedEx Cost
-    Net Profit
-    Profit Margin
-
-============================================================
-13. FEDEX COST MATCHING
-============================================================
-
-After mappings are saved:
-
-    order_awb_mapping
-
-must be joined with:
-
-    fedex_billing
-
-using:
-
-    awb_number
-
-Example:
-
-    AWB = 873549431322
-    FedEx Cost = ₹600
-
-Mapping:
-
-    873549431322
-       ↓
-    4104705089
-    4104705090
-    4104705091
-
-Number of mapped orders:
-
-    3
-
-Therefore:
-
-    ₹600 / 3
-    =
-    ₹200 per order
+1. Remove legacy code
+2. Remove unused files
+3. Remove unused components
+4. Remove unused API routes
+5. Remove obsolete services
+6. Remove test/debug files that are no longer required
+7. Remove duplicate implementations
+8. Remove abandoned migration scripts
+9. Remove unnecessary database scripts
+10. Remove temporary development files
+11. Organize the remaining project into a clean production-ready structure
+12. Preserve every currently working feature
 
 ============================================================
-14. AUTHORITATIVE ALLOCATION FORMULA
+CURRENT APPLICATION
 ============================================================
 
-Use exactly:
+This is a Next.js App Router ERP application using:
 
-    Allocated Shipping Cost
-    =
-    Total AWB Cost
-    /
-    Number of Orders Mapped to that AWB
+- Next.js
+- TypeScript
+- DuckDB
+- API routes
+- Server-side services
+- React components
+- Environment configuration
+- Etsy Statement import
+- Inventory Sheet sync
+- FedEx Billing import
+- FedEx shipment/order ↔ AWB mapping
+- Order-level FedEx cost allocation
+- Dashboard
+- Order search
+- Order Details modal
+- Financial calculations
+- Database views
+- Database backup system
+- Scheduled sync/backup jobs
 
-Do not allocate the full AWB cost to every order.
+The application is production-ready functionally.
 
-Do not use the number of AWBs as the divisor.
-
-The divisor is:
-
-    number of DISTINCT ORDERS mapped to that AWB
-
-============================================================
-15. ONE ORDER WITH MULTIPLE AWBs
-============================================================
-
-Example:
-
-    Order:
-        4104705092
-
-AWB 1:
-
-    873549431400
-    Total Cost = ₹300
-    Orders Sharing = 1
-
-    Allocation = ₹300 / 1
-               = ₹300
-
-AWB 2:
-
-    873549431401
-    Total Cost = ₹600
-    Orders Sharing = 3
-
-    Allocation = ₹600 / 3
-               = ₹200
-
-Final:
-
-    Order 4104705092 FedEx Cost
-    =
-    ₹300 + ₹200
-    =
-    ₹500
-
-Therefore:
-
-    Order FedEx Cost
-    =
-    SUM(all AWB allocations for that order)
+DO NOT break any of these features.
 
 ============================================================
-16. MULTIPLE ORDERS ON ONE AWB
+PHASE 1 — FULL REPOSITORY AUDIT
 ============================================================
 
-Example:
+Before deleting anything, recursively inspect the entire repository.
 
-    AWB = 873549431322
-    Total = ₹600
+Inspect:
 
-Orders:
+- app/
+- components/
+- lib/
+- services/
+- database/
+- scripts/
+- config/
+- public/
+- types/
+- utils/
+- api/
+- backups/
+- migrations/
+- tests/
+- __tests__/
+- docs/
+- dev/
+- import/
+- reset scripts
+- migration folders
+- temporary folders
+- root-level files
 
-    4104705089
-    4104705090
-    4104705091
+Also inspect:
 
-Allocation:
+- package.json
+- package-lock.json
+- tsconfig.json
+- next.config.*
+- eslint config
+- prettier config
+- postcss config
+- Tailwind config
+- .env files
+- .gitignore
+- README
+- Docker files if present
+- deployment files
+- cron/scheduler registration
+- database initialization
+- database migration code
+- backup code
 
-    600 / 3 = ₹200
-
-Result:
-
-    4104705089 → ₹200
-    4104705090 → ₹200
-    4104705091 → ₹200
-
-============================================================
-17. ROUNDING
-============================================================
-
-Currency allocation must reconcile exactly.
-
-Example:
-
-    ₹1,000 / 3
-
-Do not allow:
-
-    ₹333.33 × 3 = ₹999.99
-
-Instead use deterministic allocation:
-
-    ₹333.33
-    ₹333.33
-    ₹333.34
-
-Total:
-
-    ₹1,000.00
-
-The source AWB amount and total allocated amount must reconcile exactly.
-
-============================================================
-18. UNMATCHED AWB
-============================================================
-
-If:
-
-    fedex_billing.awb_number
-
-has no mapping in:
-
-    order_awb_mapping
-
-do NOT:
-
-    delete it
-    fabricate an order
-    assign it randomly
-    silently ignore it
-
-Keep the billing record as:
-
-    unmatched
-
-Expose/log the unmatched AWB so it can be investigated.
+Do NOT modify anything during the first audit.
 
 ============================================================
-19. ORDER WITHOUT AWB
+PHASE 2 — BUILD DEPENDENCY MAP
 ============================================================
 
-If an Etsy order has no FedEx mapping:
+For every candidate file, determine:
 
-    FedEx Cost = ₹0
+1. Is it imported anywhere?
+2. Is it dynamically imported?
+3. Is it referenced by an API route?
+4. Is it referenced by a cron/scheduler?
+5. Is it referenced by package.json scripts?
+6. Is it referenced by database initialization?
+7. Is it referenced by migrations?
+8. Is it referenced by deployment configuration?
+9. Is it referenced by environment configuration?
+10. Is it required at runtime even if not imported directly?
+11. Is it a database view/query dependency?
+12. Is it required by another production service?
 
-The order must still appear normally.
+Use repository-wide search.
 
-Do not block financial calculations.
-
-============================================================
-20. INTERNAL API
-============================================================
-
-Create:
-
-    POST /api/fedex/sync-mapping
-
-This endpoint should:
-
-    1. Validate that FedEx billing data exists.
-    2. Determine relevant date range.
-    3. Authenticate with external shipment API.
-    4. Fetch shipment mappings.
-    5. Validate response.
-    6. Normalize orderToAwbs.
-    7. Normalize awbToOrders.
-    8. Validate both directions.
-    9. Upsert order_awb_mapping.
-    10. Recalculate FedEx allocations.
-    11. Reconcile allocated cost against source AWB cost.
-    12. Update FedEx sync status.
-    13. Return a useful summary.
-
-Example response:
-
-    {
-      "success": true,
-      "billingRecords": 529,
-      "mappingRows": 523,
-      "newMappings": 523,
-      "duplicateMappings": 0,
-      "matchedAwbs": 500,
-      "unmatchedAwbs": 29,
-      "allocatedOrders": 510,
-      "reconciliationPassed": true
-    }
-
-Do not return the JWT.
+Do NOT rely only on filename.
 
 ============================================================
-21. AUTOMATIC TRIGGER AFTER UPLOAD
+PHASE 3 — CLASSIFY EVERY FILE
 ============================================================
 
-After successful FedEx CSV upload:
+Classify each file as exactly one of:
 
-    POST /api/upload/fedex
+A. REQUIRED — production runtime
 
-must automatically trigger:
+B. REQUIRED — configuration
 
-    /api/fedex/sync-mapping
+C. REQUIRED — database/schema/migration
 
-or, preferably, call the shared service directly rather than making an internal HTTP request.
+D. REQUIRED — deployment/operations
 
-Preferred architecture:
+E. OPTIONAL — documentation
 
-    Upload Route
-         ↓
-    FedEx Import Service
-         ↓
-    FedEx Mapping Service
-         ↓
-    Allocation Service
+F. LEGACY — safe to remove
 
-Do NOT unnecessarily do:
+G. UNUSED — safe to remove
 
-    Next.js API
-       ↓ HTTP
-    Another Next.js API
-       ↓
-    Service
+H. TEST/DEBUG — safe to remove
 
-Prefer shared server-side services.
+I. DUPLICATE — safe to consolidate/remove
 
-The internal endpoint exists for manual retry/recovery.
+J. UNKNOWN — DO NOT DELETE
+
+Anything classified as UNKNOWN must remain until proven unnecessary.
 
 ============================================================
-22. SERVICE STRUCTURE
+PHASE 4 — PROTECT CRITICAL FILES
 ============================================================
 
-Follow the existing project structure.
+Before cleanup, identify and protect:
 
-If suitable, separate responsibilities into:
+- production API routes
+- dashboard APIs
+- order details APIs
+- Etsy services
+- FedEx services
+- Inventory services
+- database initialization
+- database schema
+- database views
+- backup service
+- scheduler
+- authentication
+- environment configuration
+- shared utilities
+- financial calculation logic
 
-    fedex-import.service.ts
-    shipment-api.service.ts
-    fedex-mapping.service.ts
-    fedex-allocation.service.ts
-    fedex-reconciliation.service.ts
-
-Do not create duplicate services if equivalent services already exist.
-
-Reuse existing database utilities.
-
-============================================================
-23. SYNC STATUS
-============================================================
-
-After successful FedEx processing:
-
-    sync_metadata
-
-must contain:
-
-    sync_name = 'fedex_billing'
-
-    last_sync_at = ACTUAL successful completion timestamp
-
-If processing:
-
-    Sync in progress...
-
-If never processed:
-
-    Not synced yet
-
-If failed:
-
-    Sync failed
-
-The UI must never show an old/stale timestamp as the latest successful sync.
+Do not remove anything merely because it appears unused.
 
 ============================================================
-24. TIMEZONE
+PHASE 5 — REMOVE LEGACY / TEST / DEBUG CODE
 ============================================================
 
-Store timestamps consistently in UTC in DuckDB/application storage.
+Remove only files proven to be unused.
 
-Display them in:
+Examples of things to investigate:
 
-    Asia/Kolkata
+- old test endpoints
+- dummy endpoints
+- temporary API routes
+- manual debugging scripts
+- console/debug utilities
+- abandoned migration scripts
+- old database reset scripts
+- experimental folders
+- duplicate services
+- old FedEx implementation
+- old Etsy implementation
+- obsolete import implementation
+- temporary CSV processors
+- unused components
+- unused hooks
+- unused utilities
+- unused types
+- old views
+- obsolete scripts
+- development-only files
+- temporary JSON files
+- temporary CSV files
+- test database files
+- old backup copies committed into source control
 
-Example:
+DO NOT delete production backups automatically.
 
-Database:
-
-    2026-08-21 06:42:18 UTC
-
-UI:
-
-    21 Aug 2026 • 12:12 PM IST
-
-Do NOT manually add/subtract hours.
-
-Use proper timezone conversion.
-
-The displayed upload/sync time must represent the actual event.
-
-============================================================
-25. MANUAL CURL
-============================================================
-
-After implementation, this must work:
-
-    curl -X POST \
-      http://localhost:3000/api/fedex/sync-mapping
-
-This is only for:
-
-    testing
-    debugging
-    retry
-    manual recovery
-
-The user should NOT need to manually call:
-
-    /api/auth/login
-
-or:
-
-    /api/dashboard/shipments
-
-because the backend handles them automatically.
+First determine whether the backup directory is runtime-generated or source-controlled.
 
 ============================================================
-26. ERROR HANDLING
+PHASE 6 — DATABASE CLEANUP
 ============================================================
 
-Handle all of these:
+Inspect the actual DuckDB schema and all database initialization code.
 
-    invalid CSV
-    missing AWB
-    invalid amount
-    duplicate CSV
-    empty CSV
-    shipment API unavailable
-    authentication failure
-    expired/invalid token
-    malformed shipment response
-    missing orderToAwbs
-    missing awbToOrders
-    database failure
-    allocation failure
-    reconciliation failure
+Current important production entities include:
 
-If shipment API fails:
+- etsy_sales
+- etsy_expenses
+- etsy_allocation_batches
+- etsy_order_allocations
+- fedex_billing
+- inventory_table
+- order_awb_mapping
 
-    Do not mark FedEx mapping sync successful.
+and production financial views such as:
 
-If database transaction fails:
+- v_order_etsy_allocations
+- v_order_etsy_expenses
+- v_order_fedex_cost
+- v_order_financials
+- v_order_material_cost
+- v_order_refunds
+- v_order_sales
 
-    rollback affected changes.
+DO NOT delete any table/view until you verify:
 
-Never leave the database in a partially processed state.
+1. No production code references it.
+2. No view depends on it.
+3. No API depends on it.
+4. No calculation depends on it.
+5. No migration recreates it intentionally.
 
-============================================================
-27. TRANSACTION SAFETY
-============================================================
+Previously we encountered obsolete/duplicate concepts such as:
 
-The mapping/allocation operation should be transactional where possible.
+- etsy_statement
+- import_history
+- sync_metadata
+- older import logic
 
-Conceptually:
+Do NOT assume they are safe simply because they were previously considered unnecessary.
 
-    BEGIN
+Verify the CURRENT codebase first.
 
-        Insert/update mappings
-        Calculate allocations
-        Validate reconciliation
-        Update sync metadata
+If a table is no longer needed:
 
-    COMMIT
+- remove its creation code
+- remove its migration if obsolete
+- remove code referencing it
+- remove the table only if appropriate
+- update dependent views/services
 
-If a critical error occurs:
-
-    ROLLBACK
-
-Do not update:
-
-    last_sync_at
-
-until the operation actually succeeds.
+Do not leave code that recreates deleted tables when the application starts.
 
 ============================================================
-28. RECONCILIATION
+PHASE 7 — DATABASE INITIALIZATION
 ============================================================
 
-For every matched AWB:
+This is extremely important.
 
-    FedEx Source Cost
-    =
-    SUM(Allocated Cost Across Orders)
+The application must have ONE clear database initialization path.
 
-Example:
+Find where DuckDB is initialized.
 
-    Source = ₹600
+Find where tables are created.
 
-    Allocations:
-        ₹200
-        ₹200
-        ₹200
+Find where views are created.
 
-    Allocated = ₹600
+Find where migrations are executed.
 
-    PASS
+Remove duplicate initialization paths.
 
-If totals do not match:
+The following must NOT happen:
 
-    FAIL
+npm run dev
 
-Log the discrepancy.
+→ creates obsolete tables
 
-Do not silently accept incorrect financial data.
+→ creates duplicate tables
 
-============================================================
-29. FINANCIAL INTEGRATION
-============================================================
+→ creates old Etsy tables
 
-The authoritative order-level calculation must be:
+→ recreates deleted structures
 
-    Gross Sales
-    - Refund
-    - Etsy Expenses
-    - Material Cost
-    - FedEx Cost
-    =
-    Direct NPF
-
-FedEx Cost must come from:
-
-    fedex_billing
-        +
-    order_awb_mapping
-        +
-    allocation logic
-
-Do not calculate a second independent FedEx value in the frontend.
+There should be one authoritative schema/initialization strategy.
 
 ============================================================
-30. EXISTING VIEWS
+PHASE 8 — FOLDER STRUCTURE
+============================================================
+
+After auditing, reorganize the project into a clean structure appropriate for Next.js App Router.
+
+Use a structure similar to:
+
+app/
+├── api/
+│   ├── dashboard/
+│   ├── etsy/
+│   ├── fedex/
+│   ├── inventory/
+│   └── ...
+├── dashboard/
+│   └── page.tsx
+├── layout.tsx
+└── page.tsx
+
+components/
+├── dashboard/
+├── orders/
+├── search/
+├── upload/
+├── sync/
+└── ui/
+
+lib/
+├── db/
+├── auth/
+├── calculations/
+├── validation/
+└── utils/
+
+services/
+├── etsy/
+├── fedex/
+├── inventory/
+├── backup/
+└── sync/
+
+database/
+├── schema/
+├── views/
+├── migrations/
+└── seeds/
+
+scripts/
+├── database/
+├── maintenance/
+└── deployment/
+
+types/
+└── ...
+
+config/
+└── ...
+
+public/
+└── ...
+
+Do NOT blindly force this exact structure.
+
+Use the existing architecture where appropriate.
+
+The important requirement is:
+
+CLEAR SEPARATION OF RESPONSIBILITIES.
+
+============================================================
+PHASE 9 — FEDEx STRUCTURE
+============================================================
+
+Ensure FedEx functionality is organized cleanly.
+
+There should be a clear separation between:
+
+1. CSV import
+2. FedEx billing persistence
+3. Shipment API authentication
+4. Shipment API request
+5. Order ↔ AWB mapping
+6. AWB cost calculation
+7. Order-level FedEx allocation
+8. Reconciliation
+9. Dashboard/order-details consumption
+
+Do not keep old FedEx shipment implementations if they have been replaced.
+
+Do not maintain two different FedEx mapping implementations.
+
+============================================================
+PHASE 10 — ETSY STRUCTURE
+============================================================
+
+Ensure Etsy functionality has one authoritative implementation.
+
+Separate:
+
+- CSV import
+- sales
+- expenses
+- allocation
+- refunds
+- financial views
+
+Remove abandoned Etsy statement/import implementations only after dependency verification.
+
+============================================================
+PHASE 11 — INVENTORY STRUCTURE
+============================================================
+
+Ensure Inventory Sheet sync has one implementation.
+
+Remove:
+
+- old sync code
+- duplicate Google Sheet clients
+- old import scripts
+- unused parsers
+
+only after dependency verification.
+
+============================================================
+PHASE 12 — BACKUP SYSTEM
+============================================================
+
+Inspect the backup implementation.
+
+Ensure:
+
+- backup service has one implementation
+- scheduler has one implementation
+- retention logic has one implementation
+- DuckDB checkpoint handling is correct
+- temporary backup files are not committed to source control
+
+Previously we had:
+
+EBUSY: resource busy or locked
+
+during:
+
+DuckDB checkpoint + database copy.
+
+Do NOT ignore this.
+
+If the current backup implementation still contains the unsafe copy logic, fix it as part of production cleanup.
+
+The backup system must not corrupt the database or fail because the DB is actively locked.
+
+Do not delete backup functionality.
+
+============================================================
+PHASE 13 — ENVIRONMENT VARIABLES
+============================================================
+
+Inspect all environment variables used by the project.
+
+Create a clean environment configuration.
+
+Example categories:
+
+DATABASE
+AUTH
+ETSY
+FEDEX
+INVENTORY
+BACKUP
+APPLICATION
+
+For FedEx mapping:
+
+FEDEX_MAPPING_FROM
+FEDEX_MAPPING_TO
+
+must remain server-side environment variables.
+
+Do not expose secrets through:
+
+NEXT_PUBLIC_*
+
+Remove unused environment variables from documentation/config only after verifying they are not referenced.
+
+Do NOT expose:
+
+- passwords
+- tokens
+- API keys
+- database credentials
+
+in source code.
+
+============================================================
+PHASE 14 — PACKAGE.JSON CLEANUP
+============================================================
+
+Inspect package.json.
+
+For every dependency:
+
+determine whether it is actually used.
+
+Remove unused dependencies.
+
+Then run:
+
+npm install
+
+or the appropriate package-manager command.
+
+Do not remove a package only because direct imports are not obvious if it is required by configuration/build tooling.
+
+Also inspect:
+
+scripts
+
+Remove obsolete commands such as:
+
+- old test commands
+- abandoned migration commands
+- temporary debug commands
+- obsolete import commands
+
+only after verifying they are no longer needed.
+
+============================================================
+PHASE 15 — TYPESCRIPT CLEANUP
+============================================================
+
+Remove:
+
+- unused types
+- unused interfaces
+- unused enums
+- duplicate types
+- dead utility functions
+- unreachable code
+
+Fix all TypeScript errors.
+
+Run the project's TypeScript check.
+
+There must be no new TypeScript errors after cleanup.
+
+============================================================
+PHASE 16 — NEXT.JS CLEANUP
 ============================================================
 
 Inspect:
 
-    v_order_fedex_cost
-    v_order_financials
+- server components
+- client components
+- API routes
+- layouts
+- pages
+- loading states
+- error states
+- hooks
 
-and all dependent views.
+Remove unused client components.
 
-Update them to use the new FedEx calculation.
+Avoid unnecessary "use client".
 
-Search repository dependencies before modifying or deleting views.
+Do not convert server components to client components without a reason.
 
-Do not create duplicate financial logic.
+Do not introduce unnecessary API calls.
+
+Avoid N+1 database queries.
 
 ============================================================
-31. ORDER DETAILS
+PHASE 17 — CONSOLE / DEBUG CLEANUP
 ============================================================
 
-When searching an order, Order Details must show:
+Remove temporary debug logs such as:
 
-    Order Number
-    Sale Date
-    AWB(s)
-    Gross Sales
-    Refund
-    Etsy Expenses
-    Material Cost
-    FedEx Cost
-    Direct NPF
-    Margin
+console.log()
 
-If an order has multiple AWBs, show all of them.
+console.debug()
+
+temporary FedEx diagnostic logs
+
+temporary Etsy logs
+
+temporary database debugging
+
+BUT preserve production operational logs where useful.
+
+Use consistent prefixes, for example:
+
+[System]
+[Database]
+[FedEx]
+[Etsy]
+[Inventory]
+[Backup]
+[Scheduler]
+
+Do not remove error logging.
+
+============================================================
+PHASE 18 — TEST FILE CLEANUP
+============================================================
+
+Find all:
+
+*.test.*
+*.spec.*
+__tests__/
+test/
+tests/
+temporary scripts
+
+Do not automatically delete them.
+
+Determine whether each is:
+
+- useful production test
+- required CI test
+- obsolete test
+- temporary developer test
+
+Remove only obsolete/temporary tests.
+
+If no automated test suite is actually used, do not invent a large testing framework just for cleanup.
+
+============================================================
+PHASE 19 — DEAD API ROUTES
+============================================================
+
+Find all API routes.
+
+For each route determine:
+
+- who calls it
+- whether frontend uses it
+- whether cron uses it
+- whether external systems use it
+- whether it is documented
+- whether it is legacy
+
+Remove only routes proven obsolete.
+
+Pay special attention to:
+
+old FedEx endpoints
+old Etsy endpoints
+dummy shipment endpoints
+test endpoints
+debug endpoints
+
+============================================================
+PHASE 20 — DOCUMENTATION
+============================================================
+
+After cleanup update README.md.
+
+README should contain:
+
+1. Project overview
+2. Tech stack
+3. Folder structure
+4. Environment variables
+5. Local setup
+6. Database initialization
+7. Development command
+8. Production build
+9. Production start
+10. Etsy import flow
+11. Inventory sync flow
+12. FedEx billing flow
+13. FedEx mapping flow
+14. Order-level FedEx allocation
+15. Backup system
+16. Important API endpoints
+17. Troubleshooting
+
+Do not document deleted/obsolete functionality.
+
+============================================================
+PHASE 21 — GIT SAFETY
+============================================================
+
+Before deleting anything:
+
+Show a cleanup report.
+
+For every deletion include:
+
+FILE
+REASON
+REFERENCES FOUND
+SAFE TO DELETE
 
 Example:
 
-    Order 4104705092
+scripts/test-fedex.ts
+Reason: temporary manual testing script
+References: none
+Status: SAFE TO DELETE
 
-    AWB 873549431400
-        FedEx Allocation: ₹300
 
-    AWB 873549431401
-        FedEx Allocation: ₹200
+For anything uncertain:
 
-    Total FedEx Cost:
-        ₹500
+Status: KEEP — UNKNOWN
 
-============================================================
-32. DASHBOARD
-============================================================
 
-Update:
-
-    Total Expenses
-    Net Profit
-    Profit Margin
-    Expense Breakdown
-    Monthly Business Performance
-    Recent Orders
-
-FedEx Cost must be included correctly.
-
-Do not double count.
-
-Book Expense Cost must NOT appear as another expense category.
+Do not delete UNKNOWN files.
 
 ============================================================
-33. PERFORMANCE
+PHASE 22 — BUILD VALIDATION
 ============================================================
 
-Do NOT call the external shipment API once for every AWB.
+After cleanup run:
 
-Do NOT call it once for every order.
+npm run lint
 
-One mapping sync should fetch the required shipment dataset efficiently.
+npm run build
 
-Use:
+and the project's TypeScript validation command if separate.
 
-    bulk inserts
-    batch processing
-    grouped SQL
-    indexed joins
+Also start:
 
-where appropriate.
+npm run dev
 
-============================================================
-34. DATABASE INDEXES
-============================================================
+Verify:
 
-Ensure efficient lookups for:
-
-    fedex_billing.awb_number
-    order_awb_mapping.order_no
-    order_awb_mapping.awb_number
-
-Do not add unnecessary indexes.
-
-============================================================
-35. LOGGING
-============================================================
-
-Production logs should show:
-
-    [FedEx] Upload started
-    [FedEx] CSV validated
-    [FedEx] Records imported
-    [FedEx] Date range determined
-    [FedEx] Authenticating shipment API
-    [FedEx] Shipment API request started
-    [FedEx] Shipment API response received
-    [FedEx] orderToAwbs count
-    [FedEx] awbToOrders count
-    [FedEx] Mapping normalization completed
-    [FedEx] New mappings
-    [FedEx] Duplicate mappings
-    [FedEx] Unmatched AWBs
-    [FedEx] Allocation completed
-    [FedEx] Reconciliation completed
-    [FedEx] Sync completed
-
-Never log:
-
-    password
-    JWT
-    Authorization header
+- application starts
+- DuckDB initializes
+- database schema initializes correctly
+- no obsolete tables are recreated
+- dashboard loads
+- search works
+- Order Details works
+- Etsy data works
+- Inventory sync status works
+- FedEx billing works
+- FedEx mapping works
+- order ↔ AWB mapping works
+- order-level FedEx cost works
+- backup scheduler starts
+- no unexpected runtime errors
 
 ============================================================
-36. TEST EXACT BUSINESS CASE
+PHASE 23 — DATABASE VALIDATION
 ============================================================
 
-Use this exact test:
+After startup inspect the database.
 
-Mappings:
+Verify there are no unexpected tables.
 
-    4104705089 → 873549431322
-    4104705090 → 873549431322
-    4104705091 → 873549431322
+Verify no obsolete table is recreated automatically.
 
-    4104705092 → 873549431400
-    4104705092 → 873549431401
+Verify all production views work.
 
-Costs:
+Verify:
 
-    873549431322 = ₹600
-    873549431400 = ₹300
-    873549431401 = ₹600
+v_order_fedex_cost
 
-Expected:
+correctly calculates order-level FedEx cost.
 
-    4104705089 = ₹200 FedEx
-    4104705090 = ₹200 FedEx
-    4104705091 = ₹200 FedEx
+Verify:
 
-    4104705092:
-        ₹300 + ₹200
-        = ₹500 FedEx
+order_awb_mapping
+
+supports:
+
+One Order → One AWB
+One Order → Multiple AWBs
+One AWB → Multiple Orders
 
 ============================================================
-37. DO NOT CREATE UNNECESSARY TABLES
+PHASE 24 — FINAL CLEANUP REPORT
 ============================================================
 
-Before creating any new table:
+At the end provide:
 
-    inspect the current schema.
-
-Do not create:
-
-    another FedEx billing table
-    another mapping table
-    another allocation table
-    another sync table
-
-if an existing table can correctly support the architecture.
-
-Use:
-
-    fedex_billing
-
-and:
-
-    order_awb_mapping
-
-unless repository inspection proves another structure is necessary.
+1. Files deleted
+2. Files moved
+3. Files consolidated
+4. Dependencies removed
+5. API routes removed
+6. Database tables removed
+7. Database views changed
+8. Database initialization changes
+9. Environment variables added/removed
+10. Backup changes
+11. Folder structure after cleanup
+12. Build result
+13. Lint result
+14. Runtime validation result
+15. Any remaining technical debt
 
 ============================================================
-38. REMOVE OBSOLETE CODE
+CRITICAL RULES
 ============================================================
 
-Search the complete repository for old FedEx logic.
+1. DO NOT blindly delete.
+2. DO NOT delete anything without checking references.
+3. DO NOT break working functionality.
+4. DO NOT change business calculations.
+5. DO NOT change Etsy calculation logic.
+6. DO NOT change Inventory calculation logic.
+7. DO NOT change FedEx allocation formulas.
+8. DO NOT change dashboard financial calculations unless required to remove dead code.
+9. DO NOT expose secrets.
+10. DO NOT commit .env files containing secrets.
+11. DO NOT delete production backups without explicit confirmation.
+12. DO NOT delete unknown files.
+13. DO NOT create duplicate implementations.
+14. DO NOT create unnecessary abstractions.
+15. Prefer simple production-grade architecture.
+16. One source of truth per business calculation.
+17. One implementation per integration.
+18. One database initialization strategy.
+19. One backup implementation.
+20. One scheduler implementation.
 
-Remove unused:
+MOST IMPORTANT:
 
-    services
-    API routes
-    parsers
-    allocation functions
-    shipment integrations
-    test files
-    migration files
-    debug files
-    temporary scripts
+Before making destructive changes, create a complete dependency-aware cleanup plan.
 
-BUT:
+Then execute the plan safely.
 
-Before deleting anything, verify repository-wide references.
+If a file/table/script cannot be confidently classified as unused, KEEP IT and report it.
 
-Do NOT break:
+Do not mark the task complete until:
 
-    Etsy
-    Inventory
-    Dashboard
-    Order Search
-    Order Details
-    shared database utilities
+npm run build
 
-============================================================
-39. FINAL VERIFICATION
-============================================================
+passes successfully and the application starts cleanly with:
 
-Before declaring completion verify:
-
-[ ] FedEx CSV uploads successfully
-[ ] Only required FedEx fields stored
-[ ] File hash/idempotency works
-[ ] Upload timestamp correct
-[ ] External credentials come from .env
-[ ] Credentials never reach frontend
-[ ] Login API works
-[ ] Shipment API works
-[ ] Date range is dynamically generated
-[ ] orderToAwbs processed
-[ ] awbToOrders processed
-[ ] Mapping saved automatically
-[ ] order_awb_mapping no longer remains empty
-[ ] One Order → One AWB works
-[ ] One Order → Multiple AWBs works
-[ ] One AWB → Multiple Orders works
-[ ] Many-to-many works
-[ ] Duplicate mappings prevented
-[ ] Unmatched AWBs handled
-[ ] FedEx allocation correct
-[ ] Multiple AWBs summed correctly
-[ ] Currency rounding reconciles
-[ ] Source AWB cost reconciles with allocations
-[ ] Book Expense Cost is not double counted
-[ ] Order financials updated
-[ ] Dashboard updated
-[ ] Order Search updated
-[ ] Order Details updated
-[ ] Last Sync Status updated
-[ ] IST display is correct
-[ ] Manual POST /api/fedex/sync-mapping works
-[ ] Automatic sync after upload works
-[ ] Retry/recovery works
-[ ] No duplicate FedEx systems remain
-[ ] No obsolete FedEx code remains
-[ ] Existing Etsy flow still works
-[ ] Existing Inventory flow still works
-[ ] TypeScript passes
-[ ] Production build passes
-[ ] No dummy FedEx data remains
-
-============================================================
-40. FINAL AGENT REPORT
-============================================================
-
-After implementation, report:
-
-1. Exact files created
-2. Exact files modified
-3. Exact files deleted
-4. Database changes
-5. Existing tables retained
-6. Existing tables removed
-7. New FedEx service architecture
-8. External API integration
-9. Environment variables added
-10. Mapping implementation
-11. Allocation implementation
-12. Reconciliation result
-13. Automatic upload flow
-14. Manual recovery endpoint
-15. Tests performed
-16. Any remaining issues
-
-Do not claim completion unless the complete flow has actually been tested.
-
-The final expected production flow is:
-
-    USER
-      │
-      │ Upload FedEx CSV
-      ▼
-    Next.js Upload API
-      │
-      ▼
-    fedex_billing
-      │
-      ▼
-    FedEx Mapping Service
-      │
-      ├── POST external /api/auth/login
-      │          │
-      │          ▼
-      │        JWT
-      │
-      └── GET external /api/dashboard/shipments
-                   │
-                   ▼
-             orderToAwbs
-             awbToOrders
-                   │
-                   ▼
-          Normalize Relationships
-                   │
-                   ▼
-          order_awb_mapping
-                   │
-                   ▼
-          FedEx Allocation Service
-                   │
-                   ▼
-          Order FedEx Cost
-                   │
-                   ▼
-          Financial Views
-                   │
-                   ▼
-             Dashboard
-
-The user should only interact with the Amazia ERP UI.
-The external API authentication and mapping retrieval must happen automatically on the server.
+npm run dev

@@ -1,14 +1,14 @@
 # Accounting Engine & Reconciliation
 
-The Amazia ERP Accounting Engine acts as the central brain of the application. It takes the normalized data from DuckDB (`etsy_statement`, `fedex_billing`, and `inventory_table`) and calculates accurate profitability per order.
+The Amazia ERP Accounting Engine acts as the central brain of the application. It takes the normalized data from DuckDB (`etsy_sales/etsy_expenses`, `fedex_billing`, and `inventory_table`) and calculates accurate profitability per order.
 
 ## 1. The Reconciliation Process
 
 Reconciliation happens dynamically when the dashboard requests financial metrics. The engine performs a multi-step join across the DuckDB tables:
 
-1. **Base Sales:** Retrieves the `net_amt` from the `etsy_statement` table using the `order_no`.
+1. **Base Sales:** Retrieves the `net_amt` from the `etsy_sales/etsy_expenses` table using the `order_no`.
 2. **Shipping & Duty Allocation:** 
-   * Uses the `shipment_order_mapping` table to link the Etsy `order_no` to a FedEx `awb_number`.
+   * Uses the `order_awb_mapping` table to link the Etsy `order_no` to a FedEx `awb_number`.
    * Pulls the `air_waybill_total_amount` from the `fedex_billing` table.
 3. **Cost of Goods Sold (COGS):** Maps the `order_no` to the `inventory_table` to calculate the total material and production costs based on order quantities.
 

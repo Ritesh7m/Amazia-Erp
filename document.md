@@ -87,7 +87,7 @@ The Etsy Statement Import module processes sales information via CSV upload.
 
 **Target Table**
 
-- `etsy_statement`
+- `etsy_sales/etsy_expenses`
 
 **Relevant Fields**
 

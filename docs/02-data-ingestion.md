@@ -33,8 +33,8 @@ All dashboard calculations and financial aggregations are performed on the Next.
 Etsy sales transaction data is imported via CSV files downloaded from the Etsy seller dashboard.
 
 * **Process:** Users upload the statement CSV through the Amazia ERP dashboard.
-* **Handling:** The backend parses the CSV, extracts relevant order details, and inserts or updates records in the `etsy_statement` DuckDB table.
-* **Audit Trail:** Every import logs processing time, rows imported, and failed rows into the `import_history` table.
+* **Handling:** The backend parses the CSV, extracts relevant order details, and inserts or updates records in the `etsy_sales/etsy_expenses` DuckDB table.
+* **Audit Trail:** Every import logs processing time, rows imported, and failed rows into the `etsy_imports` table.
 
 **Example Etsy Statement Data Format:**
 
@@ -50,8 +50,8 @@ FedEx shipping, duty, tax, and transportation expenses are imported manually via
 
 * **Process:** Users upload the FedEx billing CSV through the dashboard.
 * **Handling:** The system extracts the invoice details and Air Waybill (AWB) numbers, storing them in the `fedex_billing` table.
-* **Mapping:** The `shipment_order_mapping` table maintains the relationship between Etsy Orders (`order_no`) and FedEx AWBs (`awb_number`) for accurate cost allocation.
-* **Audit Trail:** Import statistics and error details are recorded in `import_history`.
+* **Mapping:** The `order_awb_mapping` table maintains the relationship between Etsy Orders (`order_no`) and FedEx AWBs (`awb_number`) for accurate cost allocation.
+* **Audit Trail:** Import statistics and error details are recorded in `etsy_imports`.
 
 **Example FedEx Billing Data Format:**
 
