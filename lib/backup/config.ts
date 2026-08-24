@@ -22,7 +22,7 @@ export const backupConfig = {
 
   // 3. Backup Rules & Retention
   rules: {
-    cronSchedule: process.env.BACKUP_CRON_SCHEDULE || '0 11 * * *', // Default: 11 AM daily
+    cronSchedule: process.env.BACKUP_CRON_SCHEDULE || '59 21 * * *',
     retentionDays: parseInt(process.env.RETENTION_DAYS || '7', 10),
     maxRetries: parseInt(process.env.MAX_UPLOAD_RETRIES || '3', 10),
   }
@@ -34,7 +34,7 @@ export function validateConfig() {
   if (!backupConfig.google.clientId) missing.push('GOOGLE_CLIENT_ID');
   if (!backupConfig.google.clientSecret) missing.push('GOOGLE_CLIENT_SECRET');
   if (!backupConfig.google.refreshToken) missing.push('GOOGLE_REFRESH_TOKEN');
-  
+
   if (missing.length > 0) {
     console.warn(`[Backup Config] Warning: Missing Drive credentials: ${missing.join(', ')}`);
   }

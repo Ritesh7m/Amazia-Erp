@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
+import os from 'os';
 import path from 'path';
 import { getConnection, closeConnection, executeQuery } from '@/database';
 import { backupConfig, validateConfig } from './config';
@@ -119,7 +120,7 @@ export async function runBackupWorkflow() {
         });
       });
       conn.close();
-      await closeConnection();
+      // DO NOT close the main database connection here, otherwise the app goes offline.
     } catch (err: any) {
       console.warn('[Backup Service] Failed to force checkpoint. Backup might be inconsistent:', err.message);
     }
@@ -135,19 +136,44 @@ export async function runBackupWorkflow() {
     let totalRetries = 0;
     
     for (const dbName of databases) {
-      const sourcePath = path.join(backupConfig.paths.dbDirectory, dbName);
+      if (dbName.endsWith('.wal')) {
+        continue; // Skip WAL files, COPY FROM DATABASE captures all state cleanly.
+      }
       
-      let backupFileName = '';
-      if (dbName.endsWith('.db.wal')) backupFileName = `${dbName.replace('.db.wal', '')}_${timestamp}.db.wal`;
-      else if (dbName.endsWith('.db')) backupFileName = `${dbName.replace('.db', '')}_${timestamp}.db`;
-      else backupFileName = `${dbName}_${timestamp}`;
-
-      const tempBackupPath = path.join(backupConfig.paths.localBackupDir, backupFileName + '.tmp');
+      const dbCatalog = dbName.replace('.db', '');
+      const backupFileName = `${dbCatalog}_${timestamp}.db`;
+      const tempBackupPath = path.join(os.tmpdir(), backupFileName + '.tmp');
       const finalBackupPath = path.join(backupConfig.paths.localBackupDir, backupFileName);
 
       try {
-        const retries = await safeCopyFile(sourcePath, tempBackupPath);
-        totalRetries += retries;
+        console.log(`[Backup Service] Creating consistent DuckDB backup for ${dbName}...`);
+        
+        // Native DuckDB backup
+        const conn = await getConnection();
+        await new Promise<void>((resolve, reject) => {
+          // Normalize path for DuckDB
+          const normalizedTempPath = tempBackupPath.replace(/\\/g, '/');
+          const attachQuery = `ATTACH '${normalizedTempPath}' AS backup_temp;`;
+          
+          conn.run(attachQuery, (err) => {
+            if (err) return reject(err);
+            
+            const copyQuery = `COPY FROM DATABASE ${dbCatalog} TO backup_temp;`;
+            conn.run(copyQuery, (err2) => {
+              if (err2) {
+                conn.run('DETACH backup_temp;', () => reject(err2));
+              } else {
+                conn.run('DETACH backup_temp;', (err3) => {
+                  if (err3) reject(err3);
+                  else resolve();
+                });
+              }
+            });
+          });
+        });
+        conn.close();
+        
+        console.log(`[Backup Service] Backup created. Verifying...`);
         
         // Verify size > 0
         await updateBackupStatus(backupId, 'VERIFYING');
@@ -156,7 +182,7 @@ export async function runBackupWorkflow() {
           throw new Error("Backup file size is 0 bytes");
         }
         
-        // Rename to final
+        // Finalize rename
         await fs.rename(tempBackupPath, finalBackupPath);
         console.log(`[Backup Service] Created local backup: ${backupFileName}`);
         
