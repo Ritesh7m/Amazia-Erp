@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { format } from 'date-fns';
+import { formatISTDate } from '@/utils/timezone';
 
 interface SidebarProps {
   isMobileOpen: boolean;
@@ -18,6 +18,8 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
     overall: string | null;
     etsy: { status: string | null, lastSyncAt: string | null };
     fedex: { status: string | null, lastSyncAt: string | null };
+    fedexBilling?: { status: string | null, lastSyncAt: string | null };
+    fedexMapping?: { status: string | null, lastSyncAt: string | null };
     inventory: { status: string | null, lastSyncAt: string | null };
   } | null>(null);
 
@@ -25,14 +27,15 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
     if (!item || item.status === null) return 'Loading...';
     if (item.status === 'PROCESSING') return 'Sync in progress...';
     if (item.status === 'FAILED') return 'Last sync failed';
-    if (item.status === 'SYNCED' && item.lastSyncAt) {
+    if (item.status === 'PENDING') return 'Pending mapping';
+    if ((item.status === 'SYNCED' || item.status === 'COMPLETED' || item.status === 'UPLOADED') && item.lastSyncAt) {
       try {
-        return format(new Date(item.lastSyncAt), "dd MMM yyyy • hh:mm a 'IST'").toUpperCase();
+        return formatISTDate(item.lastSyncAt);
       } catch (e) {
         return 'Invalid date';
       }
     }
-    return 'Not synced yet';
+    return item.status === 'UPLOADED' ? 'Uploaded' : 'Not synced yet';
   };
 
   // 2. Fetch the dates when the sidebar loads and poll for updates
@@ -151,7 +154,11 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
               </div>
               <div>
                 <div className="text-sm font-medium flex items-center gap-2 text-[var(--color-brand-primary)]">FedEx Billing</div>
-                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates?.fedex)}</div>
+                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates?.fedexBilling || syncDates?.fedex)}</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium flex items-center gap-2 text-[var(--color-brand-primary)]">FedEx Mapping</div>
+                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates?.fedexMapping)}</div>
               </div>
               <div>
                 <div className="text-sm font-medium flex items-center gap-2 text-[var(--color-brand-primary)]">Inventory Sheet</div>

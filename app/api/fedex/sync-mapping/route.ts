@@ -18,7 +18,7 @@ export async function POST() {
   } catch (error: any) {
     console.error('[FedEx API] Unhandled error during mapping sync:', error);
     return NextResponse.json(
-      { success: false, message: 'An unexpected server error occurred.' },
+      { success: false, message: error?.message || 'An unexpected server error occurred.' },
       { status: HTTP_STATUS.INTERNAL_SERVER_ERROR }
     );
   }

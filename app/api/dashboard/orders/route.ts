@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
     const to = searchParams.get('to');
     const q = searchParams.get('q') || '';
     const refundedOnly = searchParams.get('refundedOnly') === 'true';
+    const zeroSalesOnly = searchParams.get('zeroSalesOnly') === 'true';
 
     // Validate dates
     if (!from || !to) {
@@ -50,7 +51,8 @@ export async function GET(req: NextRequest) {
       pageSize,
       offset,
       q,
-      refundedOnly
+      refundedOnly,
+      zeroSalesOnly
     );
 
     return NextResponse.json({

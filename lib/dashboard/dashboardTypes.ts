@@ -60,13 +60,21 @@ export interface ExpenseBreakdown {
 
 export interface OrderData {
   orderNo: string;
+  productTitle?: string;
+  quantity?: number;
+  materialType?: string;
+  country?: string;
   saleDate: string;
   sales: number;
+  netSales?: number;
   materialCost: number;
   dutyCost: number;
+  fedexCost?: number;
+  awbNumbers?: string;
+  awbSources?: string;
   totalExpense: number;
   estimatedProfitBeforeShipping: number;
-  margin: number;
+  margin: number | null;
   status: 'Profitable' | 'Loss' | 'Neutral';
   expenseBreakdown: ExpenseBreakdown;
   refundStatus?: 'Refunded' | 'Partially Refunded' | null;

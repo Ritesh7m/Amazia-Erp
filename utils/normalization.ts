@@ -24,14 +24,6 @@ export const normalizeAmount = (amountStr: string | number | undefined): number 
   return isNaN(parsed) ? 0 : parsed;
 };
 
-/**
- * Applies the precise formula: book_expense_cost = amount - ((amount / 118) * 100)
- */
-export const calculateBookExpenseCost = (amount: number): number => {
-  const cost = amount - ((amount / 118) * 100);
-  // Round to 2 decimal places for financial accuracy
-  return Number(cost.toFixed(2));
-};
 
 /**
  * Normalizes specific CSV date strings to standard 'YYYY-MM-DD' for DuckDB.
@@ -60,6 +52,57 @@ export const normalizeDate = (dateStr: string | undefined): string | null => {
   }
 
   return null;
+};
+
+/**
+ * Safe order number normalizer per plan.md section 2 & 17:
+ * - trim whitespace
+ * - treat as string
+ * - split only on the FIRST "_" (e.g. "4032990276_1805" -> "4032990276")
+ * - take first part as order number
+ * - preserve leading zeros if any
+ * - never convert to numeric types
+ * - if "_" does not exist, use complete trimmed string
+ * - if empty/null, return ""
+ */
+export const normalizeOrderNumber = (raw: string | number | null | undefined): string => {
+  if (raw == null) return '';
+  let str = String(raw).trim();
+  if (!str) return '';
+  if (str.startsWith('#')) {
+    str = str.substring(1).trim();
+  }
+  const underscoreIdx = str.indexOf('_');
+  if (underscoreIdx === -1) {
+    return str;
+  }
+  return str.substring(0, underscoreIdx).trim();
+};
+
+/**
+ * Centralized AWB normalizer per plan.md:
+ * - convert to string
+ * - trim whitespace
+ * - preserve exact digits/characters
+ * - never convert to JavaScript Number or perform mathematical operations
+ * - remove accidental trailing ".0" or surrounding quotes
+ * - preserve AWB as strict text
+ */
+export const normalizeAwb = (raw: any): string => {
+  if (raw == null) return '';
+  let str = String(raw).trim();
+  if (!str) return '';
+
+  // Remove surrounding quotes if present
+  str = str.replace(/^["']+|["']+$/g, '').trim();
+
+  // Remove accidental decimal suffix from CSV exports like .0, .00
+  str = str.replace(/\.0+$/, '');
+
+  // Strip spaces, dashes, commas
+  str = str.replace(/[\s\-_,]/g, '').trim();
+
+  return str;
 };
 
 /**
@@ -152,4 +195,118 @@ export const classifyEtsyTransaction = (
   }
 
   return { scope: ETSY_TRANSACTION_SCOPES.ETSY, category: category === ETSY_TRANSACTION_CATEGORIES.OTHER_ORDER_EXPENSE ? ETSY_TRANSACTION_CATEGORIES.OTHER_ETSY_EXPENSE : category };
+};
+
+/**
+ * Derives a clean, human-readable product description from Etsy CSV Title and Info fields.
+ * Per plan.md Section 4:
+ * - Combine Title + Info
+ * - Never expose JavaScript Date objects or raw date strings (e.g., "Fri Jul 31 2026 05:30:00 GMT+0530...")
+ * - Strip out order numbers or prefixes like "Payment for Order #..."
+ * - Never return Tax / Fee strings like "Tax collected at source (TCS)" as product description
+ * - Returns a concise, clean product description (fallback: "Etsy Order Item")
+ */
+export const deriveProductDescription = (title: string | undefined, info: string | undefined): string => {
+  const isNonProduct = (str: string): boolean => {
+    const s = str.trim().toLowerCase();
+    return (
+      !s ||
+      s.startsWith('tax collected') ||
+      s.startsWith('tax deducted') ||
+      s.startsWith('sales tax') ||
+      s.startsWith('regulatory') ||
+      s.startsWith('processing fee') ||
+      s.startsWith('listing fee') ||
+      s.startsWith('shipping fee') ||
+      s.startsWith('buyer fee') ||
+      s.startsWith('offsite ads') ||
+      s.startsWith('etsy ads') ||
+      s.startsWith('deposit') ||
+      s.startsWith('payment for order') ||
+      s.startsWith('refund for order') ||
+      s === 'tcs' ||
+      s === 'tds' ||
+      s === 'gst' ||
+      s === 'vat' ||
+      s === 'etsy order item' ||
+      /^order\s*#?\d+$/i.test(s)
+    );
+  };
+
+  const cleanPart = (s: string | undefined): string => {
+    if (!s) return '';
+    let res = s.trim();
+    // Remove raw date / timezone strings
+    res = res.replace(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b.*?(GMT[+-]\d{4}|India Standard Time|\b\d{4}\b)/gi, '');
+    res = res.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\s]*/g, '');
+    // Remove "Payment for Order #1234567890" or "Order #1234567890" or "#1234567890"
+    res = res.replace(/payment\s+for\s+order\s*#?\s*\d+/gi, '');
+    res = res.replace(/order\s*#?\s*\d+/gi, '');
+    res = res.replace(/#\d{8,12}\b/g, '');
+    // Strip transaction/fee prefixes so real product title is extracted (e.g. "Transaction fee: New Hydrangea PJs...")
+    res = res.replace(/^(Transaction fee|Credit for transaction fee on):\s*/i, '');
+    // Remove listing prefixes if in info/title
+    res = res.replace(/listing\s*#?\s*\d+/gi, '');
+    // Clean up multiple hyphens, colons, spaces
+    res = res.replace(/^[ -:,|]+|[ -:,|]+$/g, '').trim();
+
+    if (isNonProduct(res)) {
+      return '';
+    }
+    return res;
+  };
+
+  const cleanTitle = cleanPart(title);
+  const cleanInfo = cleanPart(info);
+
+  if (cleanTitle && cleanInfo) {
+    if (cleanTitle.toLowerCase().includes(cleanInfo.toLowerCase())) {
+      return cleanTitle;
+    }
+    if (cleanInfo.toLowerCase().includes(cleanTitle.toLowerCase())) {
+      return cleanInfo;
+    }
+    return `${cleanTitle} - ${cleanInfo}`.slice(0, 120);
+  }
+
+  if (cleanTitle) return cleanTitle.slice(0, 120);
+  if (cleanInfo) return cleanInfo.slice(0, 120);
+
+  return 'Etsy Order Item';
+};
+
+/**
+ * Formats date into clean standard format "Jul 31 2026" (per plan.md Section 5 & 20)
+ * Never exposes JavaScript Date objects or timezone strings.
+ */
+export const formatSalesDate = (dateVal: string | Date | null | undefined): string => {
+  if (!dateVal) return 'N/A';
+  const parsed = dayjs(dateVal);
+  if (!parsed.isValid()) return String(dateVal);
+  return parsed.format('MMM DD YYYY');
+};
+
+/**
+ * Generates a deterministic SHA-256 transaction hash based strictly on:
+ * Date + Title + Info + Amount + Type
+ * with occurrence tracking for identical statement items within the same upload.
+ * Per plan.md Section 3 & 14.
+ */
+export const generateDeterministicTransactionHash = (
+  date: string,
+  title: string,
+  info: string,
+  amount: number | string,
+  type: string,
+  occurrenceNo: number = 1
+): string => {
+  const normDate = date?.trim() || '';
+  const normTitle = title?.trim() || '';
+  const normInfo = info?.trim() || '';
+  const normAmount = Number(amount || 0).toFixed(2);
+  const normType = type?.trim() || '';
+  
+  const payload = `${normDate}|${normTitle}|${normInfo}|${normAmount}|${normType}|${occurrenceNo}`;
+  const crypto = require('crypto');
+  return crypto.createHash('sha256').update(payload).digest('hex');
 };

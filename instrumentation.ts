@@ -35,8 +35,8 @@ export async function register() {
     const { runInventorySync } = await import("@/services/inventorySync");
 
     cron.schedule(
-      // "*/2 * * * *",
-      "0 */6 * * *",
+      "*/2 * * * *",
+      // "0 */6 * * *",
       async () => {
         console.log(`[Scheduler] Running inventory sync at ${new Date().toISOString()}`);
         try {

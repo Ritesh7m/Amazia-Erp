@@ -44,20 +44,14 @@ function FiltersContent({ onOpenOrderDetails }: DashboardFiltersProps) {
   useEffect(() => {
     const fromParam = searchParams.get('from');
     const toParam = searchParams.get('to');
+    const rangeParam = searchParams.get('range');
 
     if (!fromParam || !toParam) {
       handleDateRangeChange('12M');
+    } else if (rangeParam) {
+      setActiveRange(rangeParam);
     } else {
-      const d1 = new Date(fromParam);
-      const d2 = new Date(toParam);
-      const diffDays = Math.round(Math.abs((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)));
-
-      if (diffDays === 7) setActiveRange('7D');
-      else if (diffDays >= 28 && diffDays <= 31) setActiveRange('30D');
-      else if (diffDays >= 89 && diffDays <= 93) setActiveRange('3M');
-      else if (diffDays >= 180 && diffDays <= 184) setActiveRange('6M');
-      else if (diffDays >= 364 && diffDays <= 366) setActiveRange('12M');
-      else setActiveRange('Custom'); 
+      setActiveRange('Custom');
     }
   }, [searchParams]);
 
@@ -104,21 +98,22 @@ function FiltersContent({ onOpenOrderDetails }: DashboardFiltersProps) {
         break;
       default: return;
     }
-    updateURL(formatDate(from), formatDate(to));
-  };
+    updateURL(formatDate(from), formatDate(to), range);
+  }
 
   const handleCustomDateChange = (type: 'from' | 'to', value: string) => {
     setActiveRange('Custom');
     const currentFrom = searchParams.get('from') || '';
     const currentTo = searchParams.get('to') || '';
-    if (type === 'from') updateURL(value, currentTo);
-    else updateURL(currentFrom, value);
+    if (type === 'from') updateURL(value, currentTo, 'Custom');
+    else updateURL(currentFrom, value, 'Custom');
   };
 
-  const updateURL = (from: string, to: string) => {
+  const updateURL = (from: string, to: string, range?: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (from) params.set('from', from);
     if (to) params.set('to', to);
+    if (range) params.set('range', range);
     params.set('page', '1'); 
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };

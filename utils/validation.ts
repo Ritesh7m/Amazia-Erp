@@ -8,7 +8,12 @@ export const fedexRowSchema = z.object({
   invoice_date: z.string().regex(dateRegex, "Invalid Invoice Date").or(z.string().length(0)),
   due_date: z.string().regex(dateRegex, "Invalid Due Date").or(z.string().length(0)),
   awb_number: z.string().min(1, "AWB Number is required"),
-  air_waybill_total_amount: z.number()
+  air_waybill_total_amount: z.number(),
+  order_no: z.string().optional(),
+  country: z.string().optional(),
+  shipper_reference_1: z.string().optional(),
+  parsed_order_no: z.string().optional(),
+  recipient_country: z.string().optional()
 });
 
 export const etsyRowSchema = z.object({

@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { OrderFinancialService } from '@/services/financial/order-financial-service';
 
-export const dynamic = 'force-dynamic';
-
+// Force recompile after database schema update
 export async function GET() {
   try {
     const dates = await OrderFinancialService.getSyncStatuses();

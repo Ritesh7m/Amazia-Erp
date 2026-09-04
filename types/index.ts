@@ -49,12 +49,19 @@ export interface ImportHistoryRecord {
 
 export interface FedexRecord {
   id?: number;
+  billing_row_hash?: string;
   invoice_type: string;
   invoice_date: string;
   due_date: string;
   awb_number: string;
+  order_no: string;
+  country: string;
   air_waybill_total_amount: number;
+  file_hash?: string;
   created_at?: Date;
+  shipper_reference_1?: string;
+  parsed_order_no?: string;
+  recipient_country?: string;
 }
 
 export interface EtsyTransactionRecord {
@@ -74,6 +81,8 @@ export interface EtsyTransactionRecord {
   transaction_fingerprint: string;
   occurrence_no: number;
   source_row_number: number;
+  quantity?: number;
+  product_description?: string;
 }
 
 export interface EtsyExpenseGroup {

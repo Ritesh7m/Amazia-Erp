@@ -34,16 +34,27 @@ class ShipmentApiService {
   private cachedToken: string | null = null;
 
   private getBaseUrl(): string {
-    const url = process.env.SHIPMENT_API_BASE_URL || 'http://100.125.123.94:4000';
-    return url.replace(/\/+$/, '');
+    const url = process.env.SHIPMENT_API_BASE_URL;
+    if (!url || !url.trim()) {
+      throw new Error('Configuration error: SHIPMENT_API_BASE_URL environment variable is missing.');
+    }
+    return url.trim().replace(/\/+$/, '');
   }
 
   private getUsername(): string {
-    return process.env.SHIPMENT_API_USERNAME || 'ops';
+    const username = process.env.SHIPMENT_API_USERNAME;
+    if (!username || !username.trim()) {
+      throw new Error('Configuration error: SHIPMENT_API_USERNAME environment variable is missing.');
+    }
+    return username.trim();
   }
 
   private getPassword(): string {
-    return process.env.SHIPMENT_API_PASSWORD || '123';
+    const password = process.env.SHIPMENT_API_PASSWORD;
+    if (!password || !password.trim()) {
+      throw new Error('Configuration error: SHIPMENT_API_PASSWORD environment variable is missing.');
+    }
+    return password.trim();
   }
 
   /**

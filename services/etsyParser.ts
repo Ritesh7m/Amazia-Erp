@@ -3,7 +3,7 @@ import { Readable } from 'stream';
 import { EtsyTransactionRecord } from '@/types';
 import { 
   normalizeAmount, normalizeDate, extractEtsyOrderNumber,
-  extractEtsyListingId 
+  extractEtsyListingId, deriveProductDescription, generateDeterministicTransactionHash 
 } from '@/utils/normalization';
 import { classifyEtsyTransaction } from '@/utils/financial-classifier';
 import crypto from 'crypto';
@@ -35,10 +35,6 @@ function getCsvField(data: Record<string, any>, possibleKeys: string[]): string 
     }
   }
   return '';
-}
-
-function generateTransactionHash(data: string): string {
-  return crypto.createHash('sha256').update(data).digest('hex');
 }
 
 export const parseEtsyCsv = async (buffer: Buffer): Promise<EtsyParseResult> => {
@@ -86,20 +82,25 @@ export const parseEtsyCsv = async (buffer: Buffer): Promise<EtsyParseResult> => 
         const normCurrency = currency.trim().toUpperCase();
         const normTaxDetails = taxDetails.trim();
         
-        // Transaction Fingerprint for deduplication
-        const transactionHashData = `${normalizedDate}|${normType}|${normTitle}|${normInfo}|${normCurrency}|${parsedAmount}|${parsedFeeAmount}|${parsedNetAmount}|${normTaxDetails}`;
-        const baseTransactionFingerprint = generateTransactionHash(transactionHashData);
-        
-        const occurrenceNo = (hashOccurrence.get(baseTransactionFingerprint) || 0) + 1;
-        hashOccurrence.set(baseTransactionFingerprint, occurrenceNo);
-        
-        const transactionFingerprint = generateTransactionHash(`${baseTransactionFingerprint}|${occurrenceNo}`);
-        
+        // Deterministic transaction hash per plan.md Section 3 & 14 (Date + Title + Info + Amount + Type)
+        const baseKey = `${normalizedDate}|${normTitle}|${normInfo}|${parsedAmount}|${normType}`;
+        const occurrenceNo = (hashOccurrence.get(baseKey) || 0) + 1;
+        hashOccurrence.set(baseKey, occurrenceNo);
+
+        const transactionFingerprint = generateDeterministicTransactionHash(
+          normalizedDate, normTitle, normInfo, parsedAmount, normType, occurrenceNo
+        );
+
+        const quantityRaw = getCsvField(data, ['Quantity', 'Qty', 'Number of Items', 'Items']);
+        const parsedQuantity = quantityRaw && !isNaN(parseInt(quantityRaw, 10)) ? Math.max(1, parseInt(quantityRaw, 10)) : 1;
+        const productDescription = deriveProductDescription(normTitle, normInfo);
+
         transactionRecords.push({
           transaction_date: normalizedDate,
           type: normType,
           title: normTitle,
           info: normInfo,
+          product_description: productDescription,
           currency: normCurrency,
           amount: parsedAmount,
           fees_taxes: parsedFeeAmount,
@@ -111,7 +112,8 @@ export const parseEtsyCsv = async (buffer: Buffer): Promise<EtsyParseResult> => 
           transaction_category: category,
           transaction_fingerprint: transactionFingerprint,
           occurrence_no: occurrenceNo,
-          source_row_number: rowNumber
+          source_row_number: rowNumber,
+          quantity: parsedQuantity
         });
       })
       .on('end', () => resolve({ transactionRecords }))

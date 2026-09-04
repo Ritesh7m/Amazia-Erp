@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-// Notice the updated path going up three directories to reach the lib folder
+
 import { runBackupWorkflow } from '../../../lib/backup/backupService';
 
 export async function GET() {
