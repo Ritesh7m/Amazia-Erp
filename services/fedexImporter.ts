@@ -32,7 +32,43 @@ export const processFedexImport = async (
   const fileHash = generateFileHash(fileBuffer);
 
   try {
-    // 1. Check for Duplicate File Upload (Idempotency)
+    // 1. Parse and Validate CSV structure (Raw text inspection & scientific notation detection)
+    const records = await parseFedexCsv(fileBuffer);
+    if (records.length === 0) {
+      return {
+        status: HTTP_STATUS.UNPROCESSABLE_ENTITY,
+        data: { success: false, message: 'No valid FedEx billing records found in the uploaded file.' }
+      };
+    }
+
+    // 2. Schema validation per row
+    let failedRowCount = 0;
+    let firstValidationError = '';
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      const validation = fedexRowSchema.safeParse(record);
+      if (!validation.success) {
+        failedRowCount++;
+        if (!firstValidationError) {
+          firstValidationError = validation.error.issues.map(e => e.message).join(', ');
+        }
+      }
+    }
+
+    if (failedRowCount > 0) {
+      return {
+        status: HTTP_STATUS.UNPROCESSABLE_ENTITY,
+        data: {
+          success: false,
+          message: `Validation failed: ${failedRowCount} row(s) did not match schema. ${firstValidationError}`,
+          totalRows: records.length,
+          failedRows: failedRowCount,
+          processingTime: Date.now() - startTime
+        }
+      };
+    }
+
+    // 3. Check for Duplicate File Upload (Idempotency for valid files)
     const existingImports = await fetchQuery<any>(
       `SELECT id, file_name, imported_rows, completed_at FROM fedex_imports WHERE file_hash = ? AND status = 'COMPLETED'`,
       [fileHash]
@@ -51,37 +87,7 @@ export const processFedexImport = async (
       };
     }
 
-    // 2. Parse and Validate CSV structure
-    const records = await parseFedexCsv(fileBuffer);
-    if (records.length === 0) {
-      return {
-        status: HTTP_STATUS.UNPROCESSABLE_ENTITY,
-        data: { success: false, message: 'No valid FedEx billing records found in the uploaded file.' }
-      };
-    }
-
-    let failedRowCount = 0;
-    for (const record of records) {
-      const validation = fedexRowSchema.safeParse(record);
-      if (!validation.success) {
-        failedRowCount++;
-      }
-    }
-
-    if (failedRowCount > 0) {
-      return {
-        status: HTTP_STATUS.UNPROCESSABLE_ENTITY,
-        data: {
-          success: false,
-          message: `Validation failed: ${failedRowCount} rows did not match schema.`,
-          totalRows: records.length,
-          failedRows: failedRowCount,
-          processingTime: Date.now() - startTime
-        }
-      };
-    }
-
-    // 3. Transactional Cumulative Ingestion, Mapping, and Allocation
+    // 4. Transactional Cumulative Ingestion, Mapping, and Allocation
     let mappingResult: any = null;
 
     await executeTransaction(async (conn: Connection) => {

@@ -8,13 +8,15 @@ export async function GET(request: Request) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
     const q = searchParams.get('q') || '';
+    const rawTab = searchParams.get('tab') as 'orders' | 'zero_sales' | 'refunds' | null;
     const refundedOnly = searchParams.get('refundedOnly') === 'true';
+    const tab: 'orders' | 'zero_sales' | 'refunds' = rawTab || (refundedOnly ? 'refunds' : 'orders');
 
     if (!from || !to) {
       return new Response('Missing date range parameters (from, to)', { status: 400 });
     }
 
-    const { data } = await OrderFinancialService.getOrders(from, to, 100000, 0, q, refundedOnly);
+    const { data } = await OrderFinancialService.getOrders(from, to, 100000, 0, q, tab);
 
     // Exact order-level headers specified in plan.md Section 23
     const headers = [

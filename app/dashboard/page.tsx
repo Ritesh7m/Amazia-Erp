@@ -7,7 +7,7 @@ import DashboardFilters from "@/components/dashboard/DashboardFilters";
 import MetricCard from "@/components/dashboard/MetricCard";
 import BusinessPerformanceChart from "@/components/dashboard/BusinessPerformanceChart";
 import ExpenseBreakdownChart from "@/components/dashboard/ExpenseBreakdownChart";
-import OrdersTable from "@/components/dashboard/OrdersTable";
+import OrdersTable, { OrderTab } from "@/components/dashboard/OrdersTable";
 import OrderDetailsModal from "@/components/dashboard/OrderDetailsModal";
 
 // Types
@@ -36,8 +36,7 @@ function DashboardContent() {
   }>({ data: [], total: 0 });
   const [ordersData, setOrdersData] = useState<OrderData[]>([]);
   const [ordersMeta, setOrdersMeta] = useState({ totalRecords: 0, page: 1, pageSize: 10, totalPages: 1 });
-  const [showRefundedOnly, setShowRefundedOnly] = useState(false);
-  const [showZeroSalesOnly, setShowZeroSalesOnly] = useState(false);
+  const [activeTab, setActiveTab] = useState<OrderTab>('orders');
   
   // Unified Modal State
   const [activeOrderNo, setActiveOrderNo] = useState<string | null>(null);
@@ -46,6 +45,17 @@ function DashboardContent() {
   const [error, setError] = useState<string | null>(null);
 
   const currentPage = parseInt(searchParams.get("page") || "1") || 1;
+
+  const handlePageChange = useCallback((newPage: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('page', String(newPage));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, router, pathname]);
+
+  const handleTabChange = useCallback((newTab: OrderTab) => {
+    setActiveTab(newTab);
+    handlePageChange(1);
+  }, [handlePageChange]);
 
   // Fetch all dashboard data concurrently
   useEffect(() => {
@@ -61,7 +71,7 @@ function DashboardContent() {
           fetch(`/api/dashboard/summary?from=${from}&to=${to}`),
           fetch(`/api/dashboard/performance?from=${from}&to=${to}`),
           fetch(`/api/dashboard/expense-breakdown?from=${from}&to=${to}`),
-          fetch(`/api/dashboard/orders?from=${from}&to=${to}&page=${currentPage}&pageSize=10&refundedOnly=${showRefundedOnly}&zeroSalesOnly=${showZeroSalesOnly}`),
+          fetch(`/api/dashboard/orders?from=${from}&to=${to}&page=${currentPage}&pageSize=10&tab=${activeTab}`),
         ]);
 
         const sumResult = await sumRes.json();
@@ -90,13 +100,7 @@ function DashboardContent() {
     };
 
     fetchDashboardData();
-  }, [from, to, currentPage, showRefundedOnly, showZeroSalesOnly]);
-
-  const handlePageChange = useCallback((newPage: number) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('page', String(newPage));
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [searchParams, router, pathname]);
+  }, [from, to, currentPage, activeTab]);
 
   // Format the comparison text string dynamically based on the date range
   const getComparisonText = () => {
@@ -189,59 +193,21 @@ function DashboardContent() {
       </div>
 
       {/* Orders Table section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4 mt-8">
-        <div>
-          <h2 className="text-xl font-bold text-[var(--color-brand-primary)]">
-            {showZeroSalesOnly ? 'Other Stores / Zero-Sales Orders' : 'Recent Orders'}
-          </h2>
-          <p className="text-xs text-[var(--color-brand-muted)] mt-0.5">
-            {showZeroSalesOnly 
-              ? 'Showing orders with ₹0.00 sales (other stores / pending sales API)' 
-              : 'Showing active orders with verified sales revenue'}
-          </p>
-        </div>
-        
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Zero Sales Toggle */}
-          <label className="flex items-center gap-2.5 cursor-pointer select-none bg-[var(--color-brand-card)] px-3.5 py-2 rounded-xl border border-[var(--color-brand-border)] shadow-sm hover:bg-[var(--color-brand-background)] transition-colors">
-            <div className="relative">
-              <input 
-                type="checkbox" 
-                className="sr-only" 
-                checked={showZeroSalesOnly}
-                onChange={() => {
-                  setShowZeroSalesOnly(!showZeroSalesOnly);
-                  handlePageChange(1);
-                }}
-              />
-              <div className={`block w-9 h-5 rounded-full transition-colors ${showZeroSalesOnly ? 'bg-indigo-600' : 'bg-gray-300'}`}></div>
-              <div className={`dot absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform ${showZeroSalesOnly ? 'transform translate-x-4' : ''}`}></div>
-            </div>
-            <span className="text-xs font-semibold text-[var(--color-brand-primary)]">
-              Zero-Sales Orders (Other Stores)
-            </span>
-          </label>
-
-          {/* Refund Toggle */}
-          <label className="flex items-center gap-2.5 cursor-pointer select-none bg-[var(--color-brand-card)] px-3.5 py-2 rounded-xl border border-[var(--color-brand-border)] shadow-sm hover:bg-[var(--color-brand-background)] transition-colors">
-            <div className="relative">
-              <input 
-                type="checkbox" 
-                className="sr-only" 
-                checked={showRefundedOnly}
-                onChange={() => {
-                  setShowRefundedOnly(!showRefundedOnly);
-                  handlePageChange(1);
-                }}
-              />
-              <div className={`block w-9 h-5 rounded-full transition-colors ${showRefundedOnly ? 'bg-amber-500' : 'bg-gray-300'}`}></div>
-              <div className={`dot absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform ${showRefundedOnly ? 'transform translate-x-4' : ''}`}></div>
-            </div>
-            <span className="text-xs font-semibold text-[var(--color-brand-primary)]">
-              Show Refunded Only
-            </span>
-          </label>
-        </div>
+      <div className="mt-8 mb-4">
+        <h2 className="text-xl font-bold text-[var(--color-brand-primary)]">
+          {activeTab === 'zero_sales'
+            ? 'Other Stores / Zero-Sales Orders'
+            : activeTab === 'refunds'
+            ? 'Refund Orders'
+            : 'Recent Orders'}
+        </h2>
+        <p className="text-xs text-[var(--color-brand-muted)] mt-0.5">
+          {activeTab === 'zero_sales'
+            ? 'Showing orders with ₹0.00 sales (other stores / pending sales API)'
+            : activeTab === 'refunds'
+            ? 'Showing fully and partially refunded orders'
+            : 'Showing active orders with verified sales revenue'}
+        </p>
       </div>
 
       <div className="mb-10">
@@ -252,7 +218,8 @@ function DashboardContent() {
           pageSize={ordersMeta.pageSize}
           totalPages={ordersMeta.totalPages}
           isLoading={loading}
-          isZeroSalesOnly={showZeroSalesOnly}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
           onPageChange={handlePageChange}
           onOpenOrderDetails={setActiveOrderNo}
         />

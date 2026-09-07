@@ -11,8 +11,16 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
     const q = searchParams.get('q') || '';
+    const rawTab = searchParams.get('tab') as 'orders' | 'zero_sales' | 'refunds' | null;
     const refundedOnly = searchParams.get('refundedOnly') === 'true';
     const zeroSalesOnly = searchParams.get('zeroSalesOnly') === 'true';
+
+    let tab: 'orders' | 'zero_sales' | 'refunds' = 'orders';
+    if (rawTab === 'zero_sales' || zeroSalesOnly) {
+      tab = 'zero_sales';
+    } else if (rawTab === 'refunds' || refundedOnly) {
+      tab = 'refunds';
+    }
 
     // Validate dates
     if (!from || !to) {
@@ -51,8 +59,7 @@ export async function GET(req: NextRequest) {
       pageSize,
       offset,
       q,
-      refundedOnly,
-      zeroSalesOnly
+      tab
     );
 
     return NextResponse.json({

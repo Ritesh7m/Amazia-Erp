@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react';
 import { OrderData } from '@/lib/dashboard/dashboardTypes';
 
+export type OrderTab = 'orders' | 'zero_sales' | 'refunds';
+
 interface OrdersTableProps {
   data: OrderData[];
   totalRecords: number;
@@ -9,12 +11,24 @@ interface OrdersTableProps {
   pageSize: number;
   totalPages: number;
   isLoading: boolean;
-  isZeroSalesOnly?: boolean;
+  activeTab: OrderTab;
+  onTabChange: (tab: OrderTab) => void;
   onPageChange: (page: number) => void;
   onOpenOrderDetails: (orderNo: string) => void;
 }
 
-export default function OrdersTable({ data, totalRecords, page, pageSize, totalPages, isLoading, isZeroSalesOnly, onPageChange, onOpenOrderDetails }: OrdersTableProps) {
+export default function OrdersTable({
+  data,
+  totalRecords,
+  page,
+  pageSize,
+  totalPages,
+  isLoading,
+  activeTab,
+  onTabChange,
+  onPageChange,
+  onOpenOrderDetails
+}: OrdersTableProps) {
 
   const fmt = (n: number | null | undefined) => {
     if (n === null || n === undefined || isNaN(n)) return 'N/A';
@@ -36,19 +50,49 @@ export default function OrdersTable({ data, totalRecords, page, pageSize, totalP
 
   return (
     <div className="bg-[var(--color-brand-card)] rounded-[var(--radius-xl)] border border-[var(--color-brand-border)] shadow-sm overflow-hidden">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-[var(--color-brand-border)] flex justify-between items-center">
-        <div className="flex items-center gap-2">
-          <h3 className="font-semibold text-[var(--color-brand-primary)]">
-            {isZeroSalesOnly ? 'Other Stores / Zero-Sales Orders' : 'Orders'}
-          </h3>
-          {isZeroSalesOnly && (
-            <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200">
-              Pending Sales API
-            </span>
-          )}
+      {/* Header with Tabs on the Left */}
+      <div className="px-5 py-3.5 border-b border-[var(--color-brand-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* Left Side Tab Navigation */}
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar p-1 bg-[var(--color-brand-background)] border border-[var(--color-brand-border)] rounded-[var(--radius-xl)] shadow-xs">
+          <button
+            type="button"
+            onClick={() => onTabChange('orders')}
+            className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
+              activeTab === 'orders'
+                ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                : 'text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+            }`}
+          >
+            Orders
+          </button>
+          <button
+            type="button"
+            onClick={() => onTabChange('zero_sales')}
+            className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
+              activeTab === 'zero_sales'
+                ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                : 'text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+            }`}
+          >
+            Zero Sales Orders
+          </button>
+          <button
+            type="button"
+            onClick={() => onTabChange('refunds')}
+            className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
+              activeTab === 'refunds'
+                ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                : 'text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+            }`}
+          >
+            Refund Orders
+          </button>
         </div>
-        <span className="text-xs text-[var(--color-brand-muted)]">{totalRecords} total orders</span>
+
+        {/* Right Side Order Count */}
+        <span className="text-xs font-medium text-[var(--color-brand-muted)] whitespace-nowrap self-end sm:self-center">
+          {totalRecords} total orders
+        </span>
       </div>
 
       {/* Table */}
@@ -72,7 +116,11 @@ export default function OrdersTable({ data, totalRecords, page, pageSize, totalP
             {data.length === 0 ? (
               <tr>
                 <td colSpan={10} className="text-center py-10 text-[var(--color-brand-muted)] text-sm">
-                  No orders found for this period.
+                  {activeTab === 'refunds'
+                    ? 'No refund orders found for this period.'
+                    : activeTab === 'zero_sales'
+                    ? 'No zero-sales orders found for this period.'
+                    : 'No orders found for this period.'}
                 </td>
               </tr>
             ) : (
@@ -97,7 +145,7 @@ export default function OrdersTable({ data, totalRecords, page, pageSize, totalP
                         )}
                         {isFullyRefunded && (
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-200">
-                            Refunded
+                            Fully Refunded
                           </span>
                         )}
                         {isPartiallyRefunded && (

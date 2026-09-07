@@ -224,9 +224,19 @@ export class OrderFinancialService {
     limit: number,
     offset: number = 0,
     searchQuery: string = "",
-    refundedOnly: boolean = false,
-    zeroSalesOnly: boolean = false
+    tab: 'orders' | 'zero_sales' | 'refunds' | boolean = 'orders',
+    refundedOnly?: boolean,
+    zeroSalesOnly?: boolean
   ): Promise<{ data: any[], totalRecords: number }> {
+    let effectiveTab: 'orders' | 'zero_sales' | 'refunds' = 'orders';
+    if (typeof tab === 'boolean') {
+      effectiveTab = tab ? 'refunds' : 'orders';
+    } else if (tab === 'zero_sales' || tab === 'refunds' || tab === 'orders') {
+      effectiveTab = tab;
+    }
+    if (refundedOnly) effectiveTab = 'refunds';
+    else if (zeroSalesOnly) effectiveTab = 'zero_sales';
+
     const hasSearch = searchQuery.trim().length > 0;
     const searchCondition = hasSearch 
       ? `AND (
@@ -239,13 +249,17 @@ export class OrderFinancialService {
           )
         )` 
       : "";
-    const refundCondition = refundedOnly ? `AND refunds > 0` : "";
-    const dateCondition = zeroSalesOnly 
-      ? `AND ((sale_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)) OR sale_date IS NULL)` 
-      : `AND sale_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)`;
-    const salesCondition = zeroSalesOnly 
-      ? `AND (sales IS NULL OR sales = 0)` 
-      : `AND ((sales IS NOT NULL AND sales > 0) OR refunds > 0)`;
+
+    let dateCondition = `AND sale_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)`;
+    let tabFilterCondition = `AND (sales IS NOT NULL AND sales > 0) AND (refunds IS NULL OR refunds = 0)`;
+
+    if (effectiveTab === 'zero_sales') {
+      dateCondition = `AND ((sale_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)) OR sale_date IS NULL)`;
+      tabFilterCondition = `AND (sales IS NULL OR sales = 0)`;
+    } else if (effectiveTab === 'refunds') {
+      dateCondition = `AND sale_date BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)`;
+      tabFilterCondition = `AND refunds > 0`;
+    }
 
     const dataQuery = `
       SELECT *
@@ -253,8 +267,7 @@ export class OrderFinancialService {
       WHERE 1=1
         ${dateCondition}
         ${searchCondition}
-        ${refundCondition}
-        ${salesCondition}
+        ${tabFilterCondition}
       ORDER BY (CASE WHEN sale_date IS NULL THEN 1 ELSE 0 END), sale_date DESC
       LIMIT ? OFFSET ?
     `;
@@ -265,8 +278,7 @@ export class OrderFinancialService {
       WHERE 1=1
         ${dateCondition}
         ${searchCondition}
-        ${refundCondition}
-        ${salesCondition}
+        ${tabFilterCondition}
     `;
 
     const dataParams: any[] = [startDate, endDate];
