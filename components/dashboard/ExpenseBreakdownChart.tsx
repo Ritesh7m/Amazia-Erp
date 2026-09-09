@@ -8,6 +8,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   'Etsy Listing Expense': '#4B8B84',
   'Etsy Ads': '#F59E0B',
   'Offsite Ads': '#F97316',
+  'Shopify Fee': '#10B981',
   'Other Etsy Expenses': '#94A3B8',
 };
 
@@ -17,6 +18,7 @@ const DISPLAY_CATEGORY_NAMES = [
   'Etsy Listing Expense',
   'Etsy Ads',
   'Offsite Ads',
+  'Shopify Fee',
   'Other Etsy Expenses',
 ];
 

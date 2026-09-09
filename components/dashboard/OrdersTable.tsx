@@ -57,33 +57,30 @@ export default function OrdersTable({
           <button
             type="button"
             onClick={() => onTabChange('orders')}
-            className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
-              activeTab === 'orders'
+            className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${activeTab === 'orders'
                 ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
                 : 'text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)] hover:bg-black/5 dark:hover:bg-white/5'
-            }`}
+              }`}
           >
             Orders
           </button>
           <button
             type="button"
             onClick={() => onTabChange('zero_sales')}
-            className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
-              activeTab === 'zero_sales'
+            className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${activeTab === 'zero_sales'
                 ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
                 : 'text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)] hover:bg-black/5 dark:hover:bg-white/5'
-            }`}
+              }`}
           >
             Zero Sales Orders
           </button>
           <button
             type="button"
             onClick={() => onTabChange('refunds')}
-            className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
-              activeTab === 'refunds'
+            className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${activeTab === 'refunds'
                 ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
                 : 'text-[var(--color-brand-muted)] hover:text-[var(--color-brand-primary)] hover:bg-black/5 dark:hover:bg-white/5'
-            }`}
+              }`}
           >
             Refund Orders
           </button>
@@ -119,8 +116,8 @@ export default function OrdersTable({
                   {activeTab === 'refunds'
                     ? 'No refund orders found for this period.'
                     : activeTab === 'zero_sales'
-                    ? 'No zero-sales orders found for this period.'
-                    : 'No orders found for this period.'}
+                      ? 'No zero-sales orders found for this period.'
+                      : 'No orders found for this period.'}
                 </td>
               </tr>
             ) : (
@@ -138,6 +135,15 @@ export default function OrdersTable({
                     <td className="px-4 py-3.5 max-w-[240px]">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-semibold text-[var(--color-brand-primary)]">{order.orderNo}</span>
+                        {(order.orderSource === 'SHOPIFY' || order.salesSource === 'SHOPIFY') ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            Shopify
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200">
+                            Etsy
+                          </span>
+                        )}
                         {order.country && order.country !== 'N/A' && (
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
                             {order.country}
@@ -151,6 +157,14 @@ export default function OrdersTable({
                         {isPartiallyRefunded && (
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">
                             Partially Refunded
+                          </span>
+                        )}
+                        {order.isClubbed && (
+                          <span 
+                            className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200"
+                            title={`Clubbed Order (${order.clubbedOrderCount || 2} orders shared AWB)`}
+                          >
+                            Clubbed ({order.clubbedOrderCount || 2})
                           </span>
                         )}
                       </div>
@@ -173,20 +187,20 @@ export default function OrdersTable({
                             if (!awb) return null;
 
                             let sourceTag = 'API';
-                            let sourceColor = 'text-emerald-700 bg-emerald-50 border-emerald-200';
+                            let sourceColor = 'text-purple-700 bg-purple-50 border-purple-200';
                             if (order.awbSources) {
                               const matched = order.awbSources.split(',').map((s) => s.trim()).find((s) => s.startsWith(awb + ':'));
                               if (matched) {
                                 const src = matched.split(':')[1] || '';
-                                if (src.includes('FedEx') && src.includes('API')) {
-                                  sourceTag = 'API • FEDEX';
+                                if (src.includes('API')) {
+                                  sourceTag = 'API';
                                   sourceColor = 'text-purple-700 bg-purple-50 border-purple-200';
-                                } else if (src.includes('FedEx')) {
+                                } else if (src.includes('FedEx') || src.includes('CSV')) {
                                   sourceTag = 'FEDEX';
                                   sourceColor = 'text-blue-700 bg-blue-50 border-blue-200';
                                 } else {
                                   sourceTag = 'API';
-                                  sourceColor = 'text-emerald-700 bg-emerald-50 border-emerald-200';
+                                  sourceColor = 'text-purple-700 bg-purple-50 border-purple-200';
                                 }
                               }
                             }
@@ -294,13 +308,12 @@ export default function OrdersTable({
                     {/* Margin */}
                     <td className="px-4 py-3.5 text-right">
                       {order.margin !== null && order.margin !== undefined && isFinite(order.margin) ? (
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          order.margin > 0 
-                            ? 'bg-[#4B8B84]/10 text-[#4B8B84]' 
-                            : order.margin < 0 
-                            ? 'bg-red-100 text-red-600 font-mono' 
-                            : 'bg-gray-100 text-gray-600'
-                        }`}>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${order.margin > 0
+                            ? 'bg-[#4B8B84]/10 text-[#4B8B84]'
+                            : order.margin < 0
+                              ? 'bg-red-100 text-red-600 font-mono'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}>
                           {order.margin.toFixed(1)}%
                         </span>
                       ) : (

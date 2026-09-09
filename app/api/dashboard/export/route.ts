@@ -18,9 +18,10 @@ export async function GET(request: Request) {
 
     const { data } = await OrderFinancialService.getOrders(from, to, 100000, 0, q, tab);
 
-    // Exact order-level headers specified in plan.md Section 23
+    // Exact order-level headers specified in plan.md Section 23 & 27
     const headers = [
       'Order Number',
+      'Source',
       'Product',
       'Country',
       'Sale Date',
@@ -31,6 +32,7 @@ export async function GET(request: Request) {
       'Material',
       'Quantity',
       'Etsy Expenses',
+      'Shopify Fee',
       'Total Expense',
       'Direct NPF',
       'Margin'
@@ -46,7 +48,8 @@ export async function GET(request: Request) {
       const materialCost = Number(order.materialCost || 0);
       const quantity = Number(order.quantity || 0);
       const etsyExpenses = Number(order.etsyExpenses || 0);
-      const totalExpense = Number(order.totalExpense || (fedexCost + materialCost + etsyExpenses));
+      const shopifyFee = Number(order.shopifyFee || 0);
+      const totalExpense = Number(order.totalExpense || (fedexCost + materialCost + etsyExpenses + shopifyFee));
       const directNpf = Number(order.profit ?? (netSales - totalExpense));
       const marginStr = order.margin !== null && order.margin !== undefined && !isNaN(order.margin)
         ? `${order.margin.toFixed(1)}%`
@@ -54,7 +57,8 @@ export async function GET(request: Request) {
 
       const row = [
         `"${order.orderNo}"`,
-        `"${(order.productTitle || 'Etsy Order Item').replace(/"/g, '""')}"`,
+        `"${order.orderSource || 'ETSY_CSV'}"`,
+        `"${(order.productTitle || 'Order Item').replace(/"/g, '""')}"`,
         `"${order.country || 'N/A'}"`,
         `"${order.saleDate}"`,
         `"=""${order.awbNumbers || 'N/A'}"""`,
@@ -64,6 +68,7 @@ export async function GET(request: Request) {
         materialCost.toFixed(2),
         quantity > 0 ? quantity : '',
         etsyExpenses.toFixed(2),
+        shopifyFee.toFixed(2),
         totalExpense.toFixed(2),
         directNpf.toFixed(2),
         `"${marginStr}"`

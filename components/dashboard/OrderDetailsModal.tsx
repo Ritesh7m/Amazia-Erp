@@ -63,24 +63,29 @@ export default function OrderDetailsModal({ orderNo, onClose }: OrderDetailsModa
   const isFullyRefunded = summary && (summary.refundStatus === 'Refunded' || (summary.refundValue >= summary.grossSales && summary.grossSales > 0));
   const isPartiallyRefunded = summary && (summary.refundStatus === 'Partially Refunded' || (hasRefund && !isFullyRefunded));
 
+  const isShopify = summary?.orderSource === 'SHOPIFY' || summary?.salesSource === 'SHOPIFY' || Number(breakdown?.shopifyFee || 0) > 0;
+  const shopifyFee = Number(breakdown.shopifyFee || summary?.shopifyFee || (isShopify ? (summary.grossSales * 0.10) : 0));
+
   // Least Proportional Charges (Section 35)
-  const etsyAds = Number(breakdown.etsyAds || 0);
-  const etsyListingExpense = Number(breakdown.listingExpense || 0);
+  const etsyAds = isShopify ? 0 : Number(breakdown.etsyAds || 0);
+  const etsyListingExpense = isShopify ? 0 : Number(breakdown.listingExpense || 0);
   const totalProportionalCharges = etsyAds + etsyListingExpense;
 
   // Order Level Expenses (Section 36 - Etsy Ads and Listing Fees MUST NOT appear here)
-  const materialCost = Number(breakdown.materialCost || 0);
-  const transactionFee = Number(breakdown.transactionFee || 0);
-  const processingFee = Number(breakdown.processingFee || 0);
-  const regulatoryFee = Number(breakdown.regulatoryFee || 0);
-  const tds = Number(breakdown.tds || 0);
-  const tcs = Number(breakdown.tcs || 0);
-  const offsiteAds = Number(breakdown.offsiteAds || 0);
+  const materialCost = Number(breakdown.materialCost || summary?.materialCost || 0);
+  const transactionFee = isShopify ? 0 : Number(breakdown.transactionFee || 0);
+  const processingFee = isShopify ? 0 : Number(breakdown.processingFee || 0);
+  const regulatoryFee = isShopify ? 0 : Number(breakdown.regulatoryFee || 0);
+  const tds = isShopify ? 0 : Number(breakdown.tds || 0);
+  const tcs = isShopify ? 0 : Number(breakdown.tcs || 0);
+  const offsiteAds = isShopify ? 0 : Number(breakdown.offsiteAds || 0);
   const fedexCost = Number(summary?.fedexCost || breakdown.fedexDutyTransportation || 0);
-  const otherOrderLevelFees = Number(breakdown.buyerFee || 0) + Number(breakdown.salesTax || 0);
+  const otherOrderLevelFees = isShopify ? 0 : (Number(breakdown.buyerFee || 0) + Number(breakdown.salesTax || 0));
 
-  const totalOrderLevelExpenses = materialCost + transactionFee + processingFee + regulatoryFee + tds + tcs + offsiteAds + fedexCost + otherOrderLevelFees;
-  const totalExpense = totalProportionalCharges + totalOrderLevelExpenses;
+  const totalOrderLevelExpenses = isShopify 
+    ? (materialCost + fedexCost + shopifyFee)
+    : (materialCost + transactionFee + processingFee + regulatoryFee + tds + tcs + offsiteAds + fedexCost + otherOrderLevelFees);
+  const totalExpense = isShopify ? totalOrderLevelExpenses : (totalProportionalCharges + totalOrderLevelExpenses);
 
   return (
     <Modal isOpen={!!orderNo} onClose={onClose}>
@@ -93,6 +98,13 @@ export default function OrderDetailsModal({ orderNo, onClose }: OrderDetailsModa
               Order #{orderNo}
             </span>
           )}
+          <span className={`text-xs font-bold px-2.5 py-0.5 rounded-md border ${
+            isShopify 
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              : 'bg-orange-50 text-orange-700 border-orange-200'
+          }`}>
+            {isShopify ? 'SHOPIFY' : 'ETSY'}
+          </span>
         </div>
         <button
           onClick={onClose}
@@ -117,12 +129,12 @@ export default function OrderDetailsModal({ orderNo, onClose }: OrderDetailsModa
           </div>
         ) : summary ? (
           <>
-            {/* 1. Header Overview Banner (Section 34, 55) */}
+            {/* 1. Header Overview Banner */}
             <div className="bg-[var(--color-brand-background)]/60 p-4 rounded-xl border border-[var(--color-brand-border)] flex flex-col gap-4">
               <div>
                 <div className="text-[10px] text-[var(--color-brand-muted)] uppercase tracking-wider font-bold">Product / Listing</div>
                 <div className="text-sm font-semibold text-[var(--color-brand-primary)] break-words mt-0.5">
-                  {summary.productTitle || 'Etsy Order Item'}
+                  {summary.productTitle || (isShopify ? 'Shopify Order Item' : 'Etsy Order Item')}
                 </div>
               </div>
 
@@ -182,100 +194,165 @@ export default function OrderDetailsModal({ orderNo, onClose }: OrderDetailsModa
               </div>
             </div>
 
-            {/* 2. LEAST PROPORTIONAL CHARGES (Section 35) */}
-            <div className="space-y-3 bg-[var(--color-brand-background)]/30 p-4 rounded-xl border border-[var(--color-brand-border)]">
-              <div className="flex justify-between items-center border-b border-[var(--color-brand-border)]/60 pb-2">
-                <h4 className="text-xs font-bold text-[var(--color-brand-primary)] uppercase tracking-wider">
-                  Proportional Charges
-                </h4>
-                <span className="text-xs font-mono font-bold text-red-500">
-                  Total: -{fmt(totalProportionalCharges)}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <div className="bg-[var(--color-brand-card)] p-3 rounded-lg border border-[var(--color-brand-border)]/60 flex justify-between items-center">
-                  <span className="text-[var(--color-brand-muted)]">Etsy Ads</span>
-                  <span className="font-mono font-medium text-red-500">{etsyAds > 0 ? `-${fmt(etsyAds)}` : '₹0.00'}</span>
+            {/* 2. SHOPIFY EXPENSE CARDS vs ETSY PROPORTIONAL & ORDER LEVEL CHARGES */}
+            {isShopify ? (
+              <div className="space-y-3 bg-[var(--color-brand-background)]/30 p-4 rounded-xl border border-[var(--color-brand-border)]">
+                <div className="flex justify-between items-center border-b border-[var(--color-brand-border)]/60 pb-2">
+                  <h4 className="text-xs font-bold text-[var(--color-brand-primary)] uppercase tracking-wider">
+                    Shopify Fee & Cost Breakdown
+                  </h4>
+                  <span className="text-xs font-mono font-bold text-red-500">
+                    Total: -{fmt(totalExpense)}
+                  </span>
                 </div>
-                <div className="bg-[var(--color-brand-card)] p-3 rounded-lg border border-[var(--color-brand-border)]/60 flex justify-between items-center">
-                  <span className="text-[var(--color-brand-muted)]">Etsy Listing Expense (Allocated)</span>
-                  <span className="font-mono font-medium text-red-500">{etsyListingExpense > 0 ? `-${fmt(etsyListingExpense)}` : '₹0.00'}</span>
-                </div>
-                <div className="bg-[var(--color-brand-card)] p-3 rounded-lg border border-[var(--color-brand-border)]/60 flex justify-between items-center font-bold">
-                  <span className="text-[var(--color-brand-primary)]">Total Proportional Charges</span>
-                  <span className="font-mono text-red-600">{totalProportionalCharges > 0 ? `-${fmt(totalProportionalCharges)}` : '₹0.00'}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 3. ORDER LEVEL EXPENSES (Section 36 - Etsy Ads & Listing Fees MUST NOT appear here) */}
-            <div className="space-y-3 bg-[var(--color-brand-background)]/30 p-4 rounded-xl border border-[var(--color-brand-border)]">
-              <div className="flex justify-between items-center border-b border-[var(--color-brand-border)]/60 pb-2">
-                <h4 className="text-xs font-bold text-[var(--color-brand-primary)] uppercase tracking-wider">
-                  Order Level Expenses
-                </h4>
-                <span className="text-xs font-mono font-bold text-red-500">
-                  Total: -{fmt(totalOrderLevelExpenses)}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                  <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Material Cost</div>
-                  <div className="font-mono font-medium text-red-500 mt-0.5">{materialCost > 0 ? `-${fmt(materialCost)}` : '₹0.00'}</div>
-                  {data?.inventory && data.inventory.length > 0 && (
-                    <div className="text-[10px] text-[var(--color-brand-muted)] mt-0.5 truncate">
-                      {data.inventory.map((i: any) => `${i.material_type || 'Item'} (${i.quantity})`).join(', ')}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="bg-[var(--color-brand-card)] p-3 rounded-lg border border-[var(--color-brand-border)]/60 flex justify-between items-center">
+                    <div>
+                      <div className="text-[var(--color-brand-primary)] font-semibold">Shopify Fee (10%)</div>
+                      <div className="text-[10px] text-[var(--color-brand-muted)] mt-0.5">10% of gross sales</div>
                     </div>
-                  )}
-                </div>
-                <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                  <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Transaction Fee</div>
-                  <div className="font-mono font-medium text-red-500 mt-0.5">{transactionFee > 0 ? `-${fmt(transactionFee)}` : '₹0.00'}</div>
-                </div>
-                <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                  <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Processing Fee</div>
-                  <div className="font-mono font-medium text-red-500 mt-0.5">{processingFee > 0 ? `-${fmt(processingFee)}` : '₹0.00'}</div>
-                </div>
-                <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                  <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Regulatory Fee</div>
-                  <div className="font-mono font-medium text-red-500 mt-0.5">{regulatoryFee > 0 ? `-${fmt(regulatoryFee)}` : '₹0.00'}</div>
-                </div>
-                <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                  <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">TDS</div>
-                  <div className="font-mono font-medium text-red-500 mt-0.5">{tds > 0 ? `-${fmt(tds)}` : '₹0.00'}</div>
-                </div>
-                <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                  <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">TCS</div>
-                  <div className="font-mono font-medium text-red-500 mt-0.5">{tcs > 0 ? `-${fmt(tcs)}` : '₹0.00'}</div>
-                </div>
-                <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                  <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Offsite Ads</div>
-                  <div className="font-mono font-medium text-red-500 mt-0.5">{offsiteAds > 0 ? `-${fmt(offsiteAds)}` : '₹0.00'}</div>
-                </div>
-                <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                  <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">FedEx Cost</div>
-                  <div className="font-mono font-medium text-red-500 mt-0.5">{fedexCost > 0 ? `-${fmt(fedexCost)}` : '₹0.00'}</div>
-                </div>
-                {Number(breakdown.salesTax || 0) > 0 && (
-                  <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                    <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Sales Tax (Withheld)</div>
-                    <div className="font-mono font-medium text-red-500 mt-0.5">-{fmt(Number(breakdown.salesTax))}</div>
+                    <span className="font-mono font-bold text-red-500">-{fmt(shopifyFee)}</span>
                   </div>
-                )}
-                {Number(breakdown.buyerFee || 0) > 0 && (
-                  <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
-                    <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Buyer Fee</div>
-                    <div className="font-mono font-medium text-red-500 mt-0.5">-{fmt(Number(breakdown.buyerFee))}</div>
+                  <div className="bg-[var(--color-brand-card)] p-3 rounded-lg border border-[var(--color-brand-border)]/60 flex justify-between items-center">
+                    <div>
+                      <div className="text-[var(--color-brand-primary)] font-semibold flex items-center gap-1.5">
+                        Material Cost
+                        {summary?.isClubbed && (
+                          <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                            Clubbed ({summary.clubbedOrderCount || 2})
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-[var(--color-brand-muted)] mt-0.5">
+                        {summary?.isClubbed 
+                          ? `Split across ${summary.clubbedOrderCount || 2} clubbed orders (${summary.clubbedCalcMethod === 'INVENTORY_SPLIT' ? 'Inventory' : 'Sales ÷ 9'})`
+                          : data?.inventory && data.inventory.length > 0 
+                            ? 'Inventory calculation' 
+                            : 'Calculated ($ USD × 9)'}
+                      </div>
+                    </div>
+                    <span className="font-mono font-bold text-red-500">{materialCost > 0 ? `-${fmt(materialCost)}` : '₹0.00'}</span>
                   </div>
-                )}
+                  <div className="bg-[var(--color-brand-card)] p-3 rounded-lg border border-[var(--color-brand-border)]/60 flex justify-between items-center">
+                    <div>
+                      <div className="text-[var(--color-brand-primary)] font-semibold">FedEx Cost</div>
+                      <div className="text-[10px] text-[var(--color-brand-muted)] mt-0.5">Allocated shipping cost</div>
+                    </div>
+                    <span className="font-mono font-bold text-red-500">{fedexCost > 0 ? `-${fmt(fedexCost)}` : '₹0.00'}</span>
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                {/* 2. LEAST PROPORTIONAL CHARGES (Section 35) */}
+                <div className="space-y-3 bg-[var(--color-brand-background)]/30 p-4 rounded-xl border border-[var(--color-brand-border)]">
+                  <div className="flex justify-between items-center border-b border-[var(--color-brand-border)]/60 pb-2">
+                    <h4 className="text-xs font-bold text-[var(--color-brand-primary)] uppercase tracking-wider">
+                      Proportional Charges
+                    </h4>
+                    <span className="text-xs font-mono font-bold text-red-500">
+                      Total: -{fmt(totalProportionalCharges)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div className="bg-[var(--color-brand-card)] p-3 rounded-lg border border-[var(--color-brand-border)]/60 flex justify-between items-center">
+                      <span className="text-[var(--color-brand-muted)]">Etsy Ads</span>
+                      <span className="font-mono font-medium text-red-500">{etsyAds > 0 ? `-${fmt(etsyAds)}` : '₹0.00'}</span>
+                    </div>
+                    <div className="bg-[var(--color-brand-card)] p-3 rounded-lg border border-[var(--color-brand-border)]/60 flex justify-between items-center">
+                      <span className="text-[var(--color-brand-muted)]">Etsy Listing Expense (Allocated)</span>
+                      <span className="font-mono font-medium text-red-500">{etsyListingExpense > 0 ? `-${fmt(etsyListingExpense)}` : '₹0.00'}</span>
+                    </div>
+                    <div className="bg-[var(--color-brand-card)] p-3 rounded-lg border border-[var(--color-brand-border)]/60 flex justify-between items-center font-bold">
+                      <span className="text-[var(--color-brand-primary)]">Total Proportional Charges</span>
+                      <span className="font-mono text-red-600">{totalProportionalCharges > 0 ? `-${fmt(totalProportionalCharges)}` : '₹0.00'}</span>
+                    </div>
+                  </div>
+                </div>
 
-            {/* 4. TOTAL EXPENSE BANNER (Section 37) */}
+                {/* 3. ORDER LEVEL EXPENSES */}
+                <div className="space-y-3 bg-[var(--color-brand-background)]/30 p-4 rounded-xl border border-[var(--color-brand-border)]">
+                  <div className="flex justify-between items-center border-b border-[var(--color-brand-border)]/60 pb-2">
+                    <h4 className="text-xs font-bold text-[var(--color-brand-primary)] uppercase tracking-wider">
+                      Order Level Expenses
+                    </h4>
+                    <span className="text-xs font-mono font-bold text-red-500">
+                      Total: -{fmt(totalOrderLevelExpenses)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                      <div className="text-[10px] text-[var(--color-brand-muted)] uppercase flex items-center gap-1">
+                        Material Cost
+                        {summary?.isClubbed && (
+                          <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                            Clubbed ({summary.clubbedOrderCount || 2})
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-mono font-medium text-red-500 mt-0.5">{materialCost > 0 ? `-${fmt(materialCost)}` : '₹0.00'}</div>
+                      {summary?.isClubbed ? (
+                        <div className="text-[10px] text-[var(--color-brand-muted)] mt-0.5 truncate">
+                          {summary.clubbedCalcMethod === 'INVENTORY_SPLIT' ? 'Split across clubbed orders' : 'Sales ÷ 9'}
+                        </div>
+                      ) : data?.inventory && data.inventory.length > 0 ? (
+                        <div className="text-[10px] text-[var(--color-brand-muted)] mt-0.5 truncate">
+                          {data.inventory.map((i: any) => `${i.material_type || 'Item'} (${i.quantity})`).join(', ')}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                      <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Transaction Fee</div>
+                      <div className="font-mono font-medium text-red-500 mt-0.5">{transactionFee > 0 ? `-${fmt(transactionFee)}` : '₹0.00'}</div>
+                    </div>
+                    <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                      <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Processing Fee</div>
+                      <div className="font-mono font-medium text-red-500 mt-0.5">{processingFee > 0 ? `-${fmt(processingFee)}` : '₹0.00'}</div>
+                    </div>
+                    <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                      <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Regulatory Fee</div>
+                      <div className="font-mono font-medium text-red-500 mt-0.5">{regulatoryFee > 0 ? `-${fmt(regulatoryFee)}` : '₹0.00'}</div>
+                    </div>
+                    <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                      <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">TDS</div>
+                      <div className="font-mono font-medium text-red-500 mt-0.5">{tds > 0 ? `-${fmt(tds)}` : '₹0.00'}</div>
+                    </div>
+                    <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                      <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">TCS</div>
+                      <div className="font-mono font-medium text-red-500 mt-0.5">{tcs > 0 ? `-${fmt(tcs)}` : '₹0.00'}</div>
+                    </div>
+                    <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                      <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Offsite Ads</div>
+                      <div className="font-mono font-medium text-red-500 mt-0.5">{offsiteAds > 0 ? `-${fmt(offsiteAds)}` : '₹0.00'}</div>
+                    </div>
+                    <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                      <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">FedEx Cost</div>
+                      <div className="font-mono font-medium text-red-500 mt-0.5">{fedexCost > 0 ? `-${fmt(fedexCost)}` : '₹0.00'}</div>
+                    </div>
+                    {Number(breakdown.salesTax || 0) > 0 && (
+                      <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                        <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Sales Tax (Withheld)</div>
+                        <div className="font-mono font-medium text-red-500 mt-0.5">-{fmt(Number(breakdown.salesTax))}</div>
+                      </div>
+                    )}
+                    {Number(breakdown.buyerFee || 0) > 0 && (
+                      <div className="bg-[var(--color-brand-card)] p-2.5 rounded-lg border border-[var(--color-brand-border)]/60">
+                        <div className="text-[10px] text-[var(--color-brand-muted)] uppercase">Buyer Fee</div>
+                        <div className="font-mono font-medium text-red-500 mt-0.5">-{fmt(Number(breakdown.buyerFee))}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* 4. TOTAL EXPENSE BANNER */}
             <div className="bg-[var(--color-brand-primary)] text-white p-4 rounded-xl flex justify-between items-center shadow-sm">
               <div>
                 <div className="text-xs font-semibold text-white/80 uppercase tracking-wider">Total Expense</div>
-                <div className="text-xs text-white/60">Proportional Charges + Order Level Expenses</div>
+                <div className="text-xs text-white/60">
+                  {isShopify ? 'Shopify Fee + Material Cost + FedEx Shipping' : 'Proportional Charges + Order Level Expenses'}
+                </div>
               </div>
               <div className="text-lg font-bold font-mono text-red-300">
                 -{fmt(totalExpense)}
@@ -317,7 +394,7 @@ export default function OrderDetailsModal({ orderNo, onClose }: OrderDetailsModa
               )}
             </div>
 
-            {/* 6. FEDEX SHIPPING DETAILS (Section 18, 55) */}
+            {/* 6. FEDEX SHIPPING DETAILS */}
             <div className="space-y-3">
               <h4 className="text-xs font-bold text-[var(--color-brand-primary)] uppercase tracking-wider">
                 FedEx Shipping Details & AWB Mapping
@@ -366,45 +443,47 @@ export default function OrderDetailsModal({ orderNo, onClose }: OrderDetailsModa
               )}
             </div>
 
-            {/* 6. ETSY EXPENSE TRANSACTIONS BREAKDOWN (Section 38, 55) */}
-            <div className="space-y-3">
-              <div className="flex justify-between items-center border-b border-[var(--color-brand-border)]/60 pb-1.5">
-                <span className="text-xs font-bold text-[var(--color-brand-primary)] uppercase tracking-wider">
-                  Etsy Transactions Breakdown
-                </span>
-              </div>
-              {transactions && transactions.length > 0 ? (
-                <div className="overflow-x-auto border border-[var(--color-brand-border)]/50 rounded-lg max-h-60 overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-[var(--color-brand-background)] sticky top-0">
-                      <tr className="border-b border-[var(--color-brand-border)]/50 text-[var(--color-brand-muted)]">
-                        <th className="px-3 py-2 text-left font-semibold">Date</th>
-                        <th className="px-3 py-2 text-left font-semibold">Type</th>
-                        <th className="px-3 py-2 text-left font-semibold">Description</th>
-                        <th className="px-3 py-2 text-right font-semibold">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--color-brand-border)]/30">
-                      {transactions.map((tx: any, idx: number) => (
-                        <tr key={idx} className="hover:bg-[var(--color-brand-background)]/30">
-                          <td className="px-3 py-2 text-[var(--color-brand-muted)] whitespace-nowrap">{formatDate(tx.date)}</td>
-                          <td className="px-3 py-2 font-medium">
-                            {tx.expense_type}
-                            {tx.is_allocation && <span className="ml-1 text-[8px] bg-blue-100 text-blue-700 px-1 py-0.5 rounded">ALLOC</span>}
-                          </td>
-                          <td className="px-3 py-2 text-[var(--color-brand-muted)] truncate max-w-[220px]" title={tx.title}>{tx.title || '-'}</td>
-                          <td className="px-3 py-2 text-right font-mono font-medium text-red-600">{fmt(tx.net_amount)}</td>
+            {/* 7. ETSY EXPENSE TRANSACTIONS BREAKDOWN (Only shown if Etsy order) */}
+            {!isShopify && (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center border-b border-[var(--color-brand-border)]/60 pb-1.5">
+                  <span className="text-xs font-bold text-[var(--color-brand-primary)] uppercase tracking-wider">
+                    Etsy Transactions Breakdown
+                  </span>
+                </div>
+                {transactions && transactions.length > 0 ? (
+                  <div className="overflow-x-auto border border-[var(--color-brand-border)]/50 rounded-lg max-h-60 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-[var(--color-brand-background)] sticky top-0">
+                        <tr className="border-b border-[var(--color-brand-border)]/50 text-[var(--color-brand-muted)]">
+                          <th className="px-3 py-2 text-left font-semibold">Date</th>
+                          <th className="px-3 py-2 text-left font-semibold">Type</th>
+                          <th className="px-3 py-2 text-left font-semibold">Description</th>
+                          <th className="px-3 py-2 text-right font-semibold">Amount</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="text-xs text-center py-3 text-[var(--color-brand-muted)] border border-[var(--color-brand-border)]/50 rounded-lg">
-                  No individual Etsy expense transactions found.
-                </div>
-              )}
-            </div>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--color-brand-border)]/30">
+                        {transactions.map((tx: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-[var(--color-brand-background)]/30">
+                            <td className="px-3 py-2 text-[var(--color-brand-muted)] whitespace-nowrap">{formatDate(tx.date)}</td>
+                            <td className="px-3 py-2 font-medium">
+                              {tx.expense_type}
+                              {tx.is_allocation && <span className="ml-1 text-[8px] bg-blue-100 text-blue-700 px-1 py-0.5 rounded">ALLOC</span>}
+                            </td>
+                            <td className="px-3 py-2 text-[var(--color-brand-muted)] truncate max-w-[220px]" title={tx.title}>{tx.title || '-'}</td>
+                            <td className="px-3 py-2 text-right font-mono font-medium text-red-600">{fmt(tx.net_amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-xs text-center py-3 text-[var(--color-brand-muted)] border border-[var(--color-brand-border)]/50 rounded-lg">
+                    No individual Etsy expense transactions found.
+                  </div>
+                )}
+              </div>
+            )}
           </>
         ) : null}
       </div>

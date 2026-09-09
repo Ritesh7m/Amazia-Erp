@@ -50,7 +50,36 @@ export async function register() {
       { timezone: "Asia/Kolkata" }
     );
 
-    // 4. Schedule database backups (daily at 2 AM)
+    // 4. Schedule Shopify / Other-Store Sales Sync (daily at 11:00 AM Asia/Kolkata per Section 8)
+    try {
+      const syncEnabled = process.env.SHOPIFY_SYNC_ENABLED !== 'false';
+      const syncHour = process.env.SHOPIFY_SYNC_HOUR || '11';
+      const timezone = process.env.SHOPIFY_SYNC_TIMEZONE || 'Asia/Kolkata';
+
+      if (syncEnabled) {
+        const { ShopifySyncService } = await import('@/services/shopifySync');
+        const cronSchedule = `0 ${syncHour} * * *`;
+
+        cron.schedule(
+          cronSchedule,
+          async () => {
+            console.log(`[Scheduler] Running daily Shopify sales sync at ${new Date().toISOString()}...`);
+            try {
+              const res = await ShopifySyncService.runSync();
+              console.log(`[Scheduler] Daily Shopify sales sync completed: ${res.message}`);
+            } catch (err) {
+              console.error('[Scheduler] Daily Shopify sales sync failed:', err);
+            }
+          },
+          { timezone }
+        );
+        console.log(`[Scheduler] Shopify sales sync registered (${cronSchedule} ${timezone}).`);
+      }
+    } catch (err) {
+      console.warn('[System] Shopify scheduler not available:', err);
+    }
+
+    // 5. Schedule database backups (daily at 2 AM)
     try {
       const { runBackupWorkflow } = await import("@/lib/backup/backupService");
       const { backupConfig } = await import("@/lib/backup/config");

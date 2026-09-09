@@ -159,6 +159,28 @@ export const runMappingAndAllocation = async (conn: Connection): Promise<SyncMap
     }
   }
 
+  // 5b. Fetch existing Tracking API mappings from database to preserve them
+  try {
+    const existingTrackingRows = await new Promise<any[]>((resolve) => {
+      conn.all(
+        `SELECT order_no, awb_number, source FROM order_awb_mapping WHERE source = 'Tracking API'`,
+        (err, res) => resolve(res || [])
+      );
+    });
+    for (const row of existingTrackingRows) {
+      const awb = normalizeAwb(row.awb_number);
+      const orderNo = normalizeOrderNumber(row.order_no);
+      if (awb && orderNo) {
+        const key = `${orderNo}|${awb}`;
+        if (!combinedMappings.has(key)) {
+          combinedMappings.set(key, { orderNo, awb, source: 'Tracking API' });
+        }
+      }
+    }
+  } catch (e) {
+    // Table may not exist yet on fresh init
+  }
+
   // 6. Atomically replace order_awb_mapping
   await new Promise<void>((resolve, reject) => {
     conn.run(`DELETE FROM order_awb_mapping;`, (err) => err ? reject(err) : resolve());

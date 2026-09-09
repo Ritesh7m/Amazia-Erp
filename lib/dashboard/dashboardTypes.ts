@@ -46,6 +46,9 @@ export interface ExpenseBreakdownPoint {
 
 export interface ExpenseBreakdown {
   materialCost: number;
+  isClubbed?: boolean;
+  clubbedOrderCount?: number;
+  clubbedCalcMethod?: string;
   fedexDutyTransportation: number;
   listingExpense: number;
   tds: number;
@@ -55,11 +58,14 @@ export interface ExpenseBreakdown {
   salesTax: number;
   regulatoryFee: number;
   etsyExpenses: number;
+  shopifyFee?: number;
   totalExpense: number;
 }
 
 export interface OrderData {
   orderNo: string;
+  orderSource?: string;
+  salesSource?: string;
   productTitle?: string;
   quantity?: number;
   materialType?: string;
@@ -68,8 +74,12 @@ export interface OrderData {
   sales: number;
   netSales?: number;
   materialCost: number;
+  isClubbed?: boolean;
+  clubbedOrderCount?: number;
+  clubbedCalcMethod?: string;
   dutyCost: number;
   fedexCost?: number;
+  shopifyFee?: number;
   awbNumbers?: string;
   awbSources?: string;
   totalExpense: number;

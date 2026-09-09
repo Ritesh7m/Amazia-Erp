@@ -202,6 +202,8 @@ export const initializeDatabase = async (): Promise<void> => {
     `CREATE SEQUENCE IF NOT EXISTS seq_inventory_table START 1;`,
     `CREATE SEQUENCE IF NOT EXISTS seq_etsy_imports START 1;`,
     `CREATE SEQUENCE IF NOT EXISTS seq_etsy_allocation_batches START 1;`,
+    `CREATE SEQUENCE IF NOT EXISTS seq_shopify_sales START 1;`,
+    `CREATE SEQUENCE IF NOT EXISTS seq_shopify_imports START 1;`,
 
     // --- FedEx Imports Tracking Table ---
     `CREATE TABLE IF NOT EXISTS fedex_imports (
@@ -373,13 +375,58 @@ export const initializeDatabase = async (): Promise<void> => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );`,
 
+    // --- Shopify Sales Ledger ---
+    `CREATE TABLE IF NOT EXISTS shopify_sales (
+      id INTEGER PRIMARY KEY DEFAULT nextval('seq_shopify_sales'),
+      order_no VARCHAR NOT NULL,
+      external_id VARCHAR NOT NULL UNIQUE,
+      sale_date DATE NOT NULL,
+      product_description VARCHAR,
+      original_product_name VARCHAR,
+      sales_amount DOUBLE NOT NULL,
+      currency VARCHAR DEFAULT 'INR',
+      usd_value DOUBLE DEFAULT 0,
+      source VARCHAR DEFAULT 'SHOPIFY',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );`,
+
+    // --- Shopify Imports & Sync Log ---
+    `CREATE TABLE IF NOT EXISTS shopify_imports (
+      id BIGINT PRIMARY KEY DEFAULT nextval('seq_shopify_imports'),
+      sync_identifier VARCHAR NOT NULL,
+      total_records INTEGER DEFAULT 0,
+      new_records INTEGER DEFAULT 0,
+      updated_records INTEGER DEFAULT 0,
+      duplicate_records INTEGER DEFAULT 0,
+      failed_records INTEGER DEFAULT 0,
+      status VARCHAR NOT NULL DEFAULT 'PROCESSING',
+      started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP,
+      error_message VARCHAR
+    );`,
+
+    // --- Clubbed Order Allocations Table ---
+    `CREATE TABLE IF NOT EXISTS order_clubbed_allocations (
+      order_no VARCHAR PRIMARY KEY,
+      awb_number VARCHAR NOT NULL,
+      clubbed_order_count INTEGER NOT NULL DEFAULT 1,
+      allocated_material_cost DOUBLE NOT NULL,
+      is_clubbed BOOLEAN DEFAULT TRUE,
+      calculation_method VARCHAR DEFAULT 'INVENTORY_SPLIT',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );`,
+
     // --- Baseline Sync Trackers ---
     `INSERT INTO sync_metadata (sync_name, last_processed_row, last_sync_at, status) 
      VALUES 
        ('fedex_billing', 0, NULL, 'NOT_SYNCED'),
        ('fedex_mapping', 0, NULL, 'PENDING'),
        ('google_sheets_inventory', 0, NULL, 'NOT_SYNCED'),
-       ('etsy_statement', 0, NULL, 'NOT_SYNCED')
+       ('etsy_statement', 0, NULL, 'NOT_SYNCED'),
+       ('shopify_sales', 0, NULL, 'NOT_SYNCED'),
+       ('tracking_lookup', 0, NULL, 'NOT_SYNCED')
      ON CONFLICT (sync_name) DO NOTHING;`
   ];
 
@@ -420,8 +467,22 @@ export const initializeDatabase = async (): Promise<void> => {
     const viewQueries = [
       // --- 1. Order Sales Aggregation View ---
       `CREATE OR REPLACE VIEW v_order_sales AS 
-        SELECT order_no, COALESCE(sum(gross_amount), 0) AS sales 
-        FROM etsy_sales 
+        WITH combined_sales AS (
+          SELECT order_no, sum(gross_amount) AS sales, CAST(0.0 AS DOUBLE) AS usd_value, 'ETSY_CSV' AS sales_source
+          FROM etsy_sales 
+          GROUP BY order_no
+          UNION ALL
+          SELECT order_no, sum(sales_amount) AS sales, sum(COALESCE(usd_value, 0)) AS usd_value, 'SHOPIFY' AS sales_source
+          FROM shopify_sales
+          WHERE order_no NOT IN (SELECT DISTINCT order_no FROM etsy_sales)
+          GROUP BY order_no
+        )
+        SELECT 
+          order_no, 
+          COALESCE(sum(sales), 0) AS sales,
+          COALESCE(sum(usd_value), 0) AS usd_value,
+          MAX(sales_source) AS sales_source
+        FROM combined_sales
         GROUP BY order_no;`,
 
       // --- 2. Order Refunds Aggregation View ---
@@ -437,8 +498,8 @@ export const initializeDatabase = async (): Promise<void> => {
                COALESCE(sum(quantity), 0) AS total_quantity,
                COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(material_type), ''), ', '), 'N/A') AS material_types,
                COALESCE(sum(CASE WHEN ((upper(material_type) = 'COTTON')) THEN ((quantity * 90)) ELSE (quantity * 100) END), 0) AS material_cost 
-        FROM inventory_table 
-        GROUP BY order_no;`,
+          FROM inventory_table 
+          GROUP BY order_no;`,
 
       // --- 4. Order FedEx Cost Aggregation View ---
       `CREATE OR REPLACE VIEW v_order_fedex_cost AS 
@@ -519,7 +580,7 @@ export const initializeDatabase = async (): Promise<void> => {
         ),
         sales_products AS (
           SELECT 
-            order_no,
+            order_no, 
             MAX(NULLIF(TRIM(product_description), '')) AS sales_title
           FROM etsy_sales
           WHERE product_description IS NOT NULL 
@@ -527,6 +588,16 @@ export const initializeDatabase = async (): Promise<void> => {
             AND product_description != 'Etsy Order Item'
             AND product_description NOT ILIKE 'Payment for Order%'
             AND product_description NOT ILIKE 'Tax %'
+          GROUP BY order_no
+        ),
+        shopify_products AS (
+          SELECT 
+            order_no,
+            MAX(NULLIF(TRIM(product_description), '')) AS shopify_title
+          FROM shopify_sales
+          WHERE product_description IS NOT NULL 
+            AND product_description != '' 
+            AND product_description != 'External Order'
           GROUP BY order_no
         ),
         inventory_products AS (
@@ -541,6 +612,8 @@ export const initializeDatabase = async (): Promise<void> => {
           UNION
           SELECT order_no FROM etsy_sales
           UNION
+          SELECT order_no FROM shopify_sales
+          UNION
           SELECT order_no FROM etsy_expenses WHERE order_no IS NOT NULL AND order_no != ''
           UNION
           SELECT order_no FROM inventory_table
@@ -550,21 +623,20 @@ export const initializeDatabase = async (): Promise<void> => {
         SELECT 
           o.order_no,
           COALESCE(
+            sh.shopify_title,
             ep.expense_title,
+            s.sales_title,
             CASE 
-              WHEN ord.product_description ILIKE 'Tax %' OR ord.product_description ILIKE 'Payment for Order%' OR ord.product_description ILIKE 'TCS%' OR ord.product_description ILIKE 'TDS%' OR ord.product_description ILIKE 'Processing fee%' OR ord.product_description ILIKE 'Regulatory%' OR ord.product_description = 'Etsy Order Item' THEN NULL
+              WHEN ord.product_description ILIKE 'Tax %' OR ord.product_description ILIKE 'Payment for Order%' OR ord.product_description ILIKE 'TCS%' OR ord.product_description ILIKE 'TDS%' OR ord.product_description ILIKE 'Processing fee%' OR ord.product_description ILIKE 'Regulatory%' OR ord.product_description = 'Etsy Order Item' OR ord.product_description = 'External Order' THEN NULL
               ELSE TRIM(ord.product_description)
             END,
-            CASE 
-              WHEN s.sales_title ILIKE 'Tax %' OR s.sales_title ILIKE 'Payment for Order%' OR s.sales_title ILIKE 'TCS%' OR s.sales_title ILIKE 'TDS%' OR s.sales_title ILIKE 'Processing fee%' OR s.sales_title ILIKE 'Regulatory%' OR s.sales_title = 'Etsy Order Item' THEN NULL
-              ELSE TRIM(s.sales_title)
-            END,
             i.inventory_desc, 
-            'Etsy Order Item'
+            CASE WHEN COALESCE(ord.sales_source, ord.order_source) = 'SHOPIFY' OR sh.shopify_title IS NOT NULL THEN 'Shopify Order' ELSE 'Etsy Order Item' END
           ) AS product_title
         FROM all_product_orders o
         LEFT JOIN orders ord ON o.order_no = ord.order_no
         LEFT JOIN sales_products s ON o.order_no = s.order_no
+        LEFT JOIN shopify_products sh ON o.order_no = sh.order_no
         LEFT JOIN unique_expense_products ep ON o.order_no = ep.order_no
         LEFT JOIN inventory_products i ON o.order_no = i.order_no;`,
 
@@ -599,6 +671,8 @@ export const initializeDatabase = async (): Promise<void> => {
         WITH sales_orders AS (
           SELECT order_no, sale_date, product_description FROM etsy_sales WHERE sale_date IS NOT NULL
           UNION ALL
+          SELECT order_no, sale_date, product_description FROM shopify_sales WHERE sale_date IS NOT NULL
+          UNION ALL
           SELECT order_no, sale_date, product_description FROM orders WHERE sale_date IS NOT NULL AND sales_source != 'NONE'
         ),
         expense_orders AS (
@@ -621,63 +695,148 @@ export const initializeDatabase = async (): Promise<void> => {
           SELECT 
             order_no, 
             MIN(sale_date) AS sale_date, 
-            MAX(product_description) AS fallback_product_desc 
+            MAX(
+              CASE 
+                WHEN product_description ILIKE 'Payment for Order%' OR product_description ILIKE 'Tax %' OR product_description = 'Etsy Order Item' OR product_description = 'External Order' THEN NULL 
+                ELSE product_description 
+              END
+            ) AS fallback_product_desc 
           FROM all_orders 
           GROUP BY order_no
         )
         SELECT 
           o.order_no, 
+          CASE 
+            WHEN s.sales_source = 'SHOPIFY' OR ord.sales_source = 'SHOPIFY' OR ord.order_source = 'SHOPIFY' THEN 'SHOPIFY'
+            WHEN s.sales_source = 'ETSY_CSV' OR ord.sales_source = 'ETSY_CSV' OR ord.order_source = 'ETSY_CSV' THEN 'ETSY_CSV'
+            ELSE COALESCE(ord.order_source, 'ETSY_CSV')
+          END AS order_source,
+          COALESCE(s.sales_source, ord.sales_source, 'NONE') AS sales_source,
           o.sale_date,
           CASE WHEN o.sale_date IS NOT NULL THEN strftime(o.sale_date, '%b %d %Y') ELSE 'N/A' END AS formatted_sale_date, 
           COALESCE(p.product_title, o.fallback_product_desc, 'Etsy Order Item') AS product_title,
           COALESCE(f.country, 'N/A') AS country,
           s.sales AS sales, 
-          COALESCE(r.refunds, 0) AS refunds, 
-          (COALESCE(s.sales, 0) - COALESCE(r.refunds, 0)) AS net_sales, 
-          COALESCE(m.material_cost, 0) AS material_cost, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE r.refunds END, 0) AS refunds, 
+          (COALESCE(s.sales, 0) - COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE r.refunds END, 0)) AS net_sales, 
+          (
+            CASE 
+              WHEN c.allocated_material_cost IS NOT NULL THEN c.allocated_material_cost
+              WHEN COALESCE(m.material_cost, 0) > 0 THEN m.material_cost
+              WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (COALESCE(s.usd_value, 0) * 9.0)
+              ELSE 0.0
+            END
+          ) AS material_cost, 
           COALESCE(m.total_quantity, 0) AS quantity,
           COALESCE(m.material_types, 'N/A') AS material_type,
+          COALESCE(c.is_clubbed, FALSE) AS is_clubbed,
+          COALESCE(c.clubbed_order_count, 1) AS clubbed_order_count,
+          c.calculation_method AS clubbed_calc_method,
           COALESCE(f.fedex_cost, 0) AS fedex_cost, 
           COALESCE(f.fedex_duty, 0) AS fedex_duty, 
           COALESCE(f.fedex_transportation, 0) AS fedex_transportation, 
           COALESCE(f.awb_numbers, 'N/A') AS awb_numbers, 
           COALESCE(f.awb_sources, 'N/A') AS awb_sources, 
           COALESCE(f.fedex_match_status, 'UNMATCHED') AS fedex_match_status, 
-          COALESCE(a.etsy_listing_expense, 0) AS etsy_listing_expense, 
-          COALESCE(a.etsy_ads_expense, 0) AS etsy_ads_expense, 
-          COALESCE(a.total_allocated_expenses, 0) AS total_allocated_expenses, 
-          COALESCE(e.tds, 0) AS tds, 
-          COALESCE(e.tcs, 0) AS tcs, 
-          COALESCE(e.transaction_fee, 0) AS transaction_fee, 
-          COALESCE(e.processing_fee, 0) AS processing_fee, 
-          COALESCE(e.sales_tax, 0) AS sales_tax, 
-          COALESCE(e.regulatory_fee, 0) AS regulatory_fee, 
-          COALESCE(e.buyer_fee, 0) AS buyer_fee, 
-          COALESCE(e.offsite_ads, 0) AS offsite_ads, 
-          COALESCE(e.total_order_etsy_expenses, 0) AS order_etsy_expenses, 
-          (COALESCE(e.total_order_etsy_expenses, 0) + COALESCE(a.total_allocated_expenses, 0)) AS etsy_expenses, 
-          (((COALESCE(m.material_cost, 0) + COALESCE(f.fedex_cost, 0)) + COALESCE(e.total_order_etsy_expenses, 0)) + COALESCE(a.total_allocated_expenses, 0)) AS total_expense, 
-          ((COALESCE(s.sales, 0) - COALESCE(r.refunds, 0)) - (((COALESCE(m.material_cost, 0) + COALESCE(f.fedex_cost, 0)) + COALESCE(e.total_order_etsy_expenses, 0)) + COALESCE(a.total_allocated_expenses, 0))) AS profit, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE a.etsy_listing_expense END, 0) AS etsy_listing_expense, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE a.etsy_ads_expense END, 0) AS etsy_ads_expense, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE a.total_allocated_expenses END, 0) AS total_allocated_expenses, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE e.tds END, 0) AS tds, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE e.tcs END, 0) AS tcs, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE e.transaction_fee END, 0) AS transaction_fee, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE e.processing_fee END, 0) AS processing_fee, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE e.sales_tax END, 0) AS sales_tax, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE e.regulatory_fee END, 0) AS regulatory_fee, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE e.buyer_fee END, 0) AS buyer_fee, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE e.offsite_ads END, 0) AS offsite_ads, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE e.total_order_etsy_expenses END, 0) AS order_etsy_expenses, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE (COALESCE(e.total_order_etsy_expenses, 0) + COALESCE(a.total_allocated_expenses, 0)) END, 0) AS etsy_expenses, 
+          COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (s.sales * 0.10) ELSE 0 END, 0) AS shopify_fee,
+          (
+            (
+              CASE 
+                WHEN c.allocated_material_cost IS NOT NULL THEN c.allocated_material_cost
+                WHEN COALESCE(m.material_cost, 0) > 0 THEN m.material_cost
+                WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (COALESCE(s.usd_value, 0) * 9.0)
+                ELSE 0.0
+              END
+            ) + 
+            COALESCE(f.fedex_cost, 0) + 
+            COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE (COALESCE(e.total_order_etsy_expenses, 0) + COALESCE(a.total_allocated_expenses, 0)) END, 0) +
+            COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (s.sales * 0.10) ELSE 0 END, 0)
+          ) AS total_expense, 
+          (
+            (COALESCE(s.sales, 0) - COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE r.refunds END, 0)) -
+            (
+              (
+                CASE 
+                  WHEN c.allocated_material_cost IS NOT NULL THEN c.allocated_material_cost
+                  WHEN COALESCE(m.material_cost, 0) > 0 THEN m.material_cost
+                  WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (COALESCE(s.usd_value, 0) * 9.0)
+                  ELSE 0.0
+                END
+              ) + 
+              COALESCE(f.fedex_cost, 0) + 
+              COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE (COALESCE(e.total_order_etsy_expenses, 0) + COALESCE(a.total_allocated_expenses, 0)) END, 0) +
+              COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (s.sales * 0.10) ELSE 0 END, 0)
+            )
+          ) AS profit, 
           CASE  
-            WHEN (((COALESCE(s.sales, 0) - COALESCE(r.refunds, 0)) > 0)) 
-              THEN ((((COALESCE(s.sales, 0) - COALESCE(r.refunds, 0)) - (((COALESCE(m.material_cost, 0) + COALESCE(f.fedex_cost, 0)) + COALESCE(e.total_order_etsy_expenses, 0)) + COALESCE(a.total_allocated_expenses, 0))) / (COALESCE(s.sales, 0) - COALESCE(r.refunds, 0))) * 100) 
+            WHEN (((COALESCE(s.sales, 0) - COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE r.refunds END, 0)) > 0)) 
+              THEN (
+                (
+                  (COALESCE(s.sales, 0) - COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE r.refunds END, 0)) -
+                  (
+                    (
+                      CASE 
+                        WHEN c.allocated_material_cost IS NOT NULL THEN c.allocated_material_cost
+                        WHEN COALESCE(m.material_cost, 0) > 0 THEN m.material_cost
+                        WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (COALESCE(s.usd_value, 0) * 9.0)
+                        ELSE 0.0
+                      END
+                    ) + 
+                    COALESCE(f.fedex_cost, 0) + 
+                    COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE (COALESCE(e.total_order_etsy_expenses, 0) + COALESCE(a.total_allocated_expenses, 0)) END, 0) +
+                    COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (s.sales * 0.10) ELSE 0 END, 0)
+                  )
+                ) / (COALESCE(s.sales, 0) - COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE r.refunds END, 0)) * 100
+              ) 
             WHEN (COALESCE(s.sales, 0) > 0)
-              THEN ((((COALESCE(s.sales, 0) - COALESCE(r.refunds, 0)) - (((COALESCE(m.material_cost, 0) + COALESCE(f.fedex_cost, 0)) + COALESCE(e.total_order_etsy_expenses, 0)) + COALESCE(a.total_allocated_expenses, 0))) / COALESCE(s.sales, 0)) * 100) 
+              THEN (
+                (
+                  (COALESCE(s.sales, 0) - COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE r.refunds END, 0)) -
+                  (
+                    (
+                      CASE 
+                        WHEN c.allocated_material_cost IS NOT NULL THEN c.allocated_material_cost
+                        WHEN COALESCE(m.material_cost, 0) > 0 THEN m.material_cost
+                        WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (COALESCE(s.usd_value, 0) * 9.0)
+                        ELSE 0.0
+                      END
+                    ) + 
+                    COALESCE(f.fedex_cost, 0) + 
+                    COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN 0 ELSE (COALESCE(e.total_order_etsy_expenses, 0) + COALESCE(a.total_allocated_expenses, 0)) END, 0) +
+                    COALESCE(CASE WHEN COALESCE(s.sales_source, ord.sales_source) = 'SHOPIFY' THEN (s.sales * 0.10) ELSE 0 END, 0)
+                  )
+                ) / (COALESCE(s.sales, 0)) * 100
+              )
             ELSE NULL 
           END AS margin,
           CASE 
-            WHEN COALESCE(r.refunds, 0) >= COALESCE(s.sales, 0) AND COALESCE(s.sales, 0) > 0 THEN 'Refunded'
-            WHEN COALESCE(r.refunds, 0) > 0 THEN 'Partially Refunded'
-            ELSE NULL
+            WHEN ((COALESCE(s.sales, 0) > 0) AND (COALESCE(r.refunds, 0) >= COALESCE(s.sales, 0))) THEN 'Refunded'
+            WHEN (COALESCE(r.refunds, 0) > 0) THEN 'Partially Refunded'
+            ELSE NULL 
           END AS refund_status
-        FROM unique_orders AS o 
-        LEFT JOIN v_order_products AS p ON ((o.order_no = p.order_no)) 
-        LEFT JOIN v_order_sales AS s ON ((o.order_no = s.order_no)) 
-        LEFT JOIN v_order_refunds AS r ON ((o.order_no = r.order_no)) 
-        LEFT JOIN v_order_material_cost AS m ON ((o.order_no = m.order_no)) 
-        LEFT JOIN v_order_fedex_cost AS f ON ((o.order_no = f.order_no)) 
-        LEFT JOIN v_order_etsy_expenses AS e ON ((o.order_no = e.order_no)) 
-        LEFT JOIN v_order_etsy_allocations AS a ON ((o.order_no = a.order_no));`
+        FROM unique_orders o 
+        LEFT JOIN orders ord ON o.order_no = ord.order_no
+        LEFT JOIN v_order_products p ON o.order_no = p.order_no 
+        LEFT JOIN v_order_sales s ON o.order_no = s.order_no 
+        LEFT JOIN v_order_refunds r ON o.order_no = r.order_no 
+        LEFT JOIN v_order_material_cost m ON o.order_no = m.order_no 
+        LEFT JOIN order_clubbed_allocations c ON o.order_no = c.order_no
+        LEFT JOIN v_order_fedex_cost f ON o.order_no = f.order_no 
+        LEFT JOIN v_order_etsy_expenses e ON o.order_no = e.order_no 
+        LEFT JOIN v_order_etsy_allocations a ON o.order_no = a.order_no;`
     ];
 
     for (let j = 0; j < viewQueries.length; j++) {
@@ -797,6 +956,7 @@ export const initializeDatabase = async (): Promise<void> => {
     try {
       await new Promise<void>((resolve) => conn.run(`UPDATE etsy_imports SET status = 'FAILED', error_message = 'Interrupted processing' WHERE status = 'PROCESSING';`, () => resolve()));
       await new Promise<void>((resolve) => conn.run(`UPDATE fedex_imports SET status = 'FAILED' WHERE status = 'PROCESSING';`, () => resolve()));
+      await new Promise<void>((resolve) => conn.run(`UPDATE shopify_imports SET status = 'FAILED', error_message = 'Interrupted processing' WHERE status = 'PROCESSING';`, () => resolve()));
     } catch (e) {}
   } finally {
     try { conn.close(); } catch (e) {}
@@ -819,6 +979,8 @@ export const resetDatabase = async (): Promise<void> => {
     `DROP TABLE IF EXISTS etsy_imports;`,
     `DROP TABLE IF EXISTS etsy_sales;`,
     `DROP TABLE IF EXISTS etsy_expenses;`,
+    `DROP TABLE IF EXISTS shopify_sales;`,
+    `DROP TABLE IF EXISTS shopify_imports;`,
     `DROP TABLE IF EXISTS fedex_imports;`,
     `DROP TABLE IF EXISTS fedex_billing;`,
     `DROP TABLE IF EXISTS inventory_table;`,
@@ -831,7 +993,9 @@ export const resetDatabase = async (): Promise<void> => {
     `DROP SEQUENCE IF EXISTS seq_fedex_allocations;`,
     `DROP SEQUENCE IF EXISTS seq_inventory_table;`,
     `DROP SEQUENCE IF EXISTS seq_etsy_imports;`,
-    `DROP SEQUENCE IF EXISTS seq_etsy_allocation_batches;`
+    `DROP SEQUENCE IF EXISTS seq_etsy_allocation_batches;`,
+    `DROP SEQUENCE IF EXISTS seq_shopify_sales;`,
+    `DROP SEQUENCE IF EXISTS seq_shopify_imports;`
   ];
 
   const conn = await getConnection();

@@ -20,6 +20,7 @@ export interface MonthlyPerformance {
   fedexCost: number;
   etsyListingExpense: number;
   etsyExpenses: number;
+  shopifyFee?: number;
 }
 
 export interface ExpenseBreakdown {
@@ -27,18 +28,25 @@ export interface ExpenseBreakdown {
   fedexDutyTransportation: number;
   etsyListingExpense: number;
   etsyExpenses: number;
+  shopifyFee?: number;
   totalExpenses: number;
 }
 
 export interface OrderFinancial {
   orderNo: string;
+  orderSource?: string;
+  salesSource?: string;
   saleDate: string;
   sales: number;
   refunds: number;
   materialCost: number;
+  isClubbed?: boolean;
+  clubbedOrderCount?: number;
+  clubbedCalcMethod?: string;
   fedexCost: number;
   etsyListingExpense: number;
   etsyExpenses: number;
+  shopifyFee?: number;
   totalExpense: number;
   profit: number;
   margin: number;
@@ -56,6 +64,8 @@ export interface SyncStatuses {
   fedex: SyncStatusItem;
   fedexBilling: SyncStatusItem;
   fedexMapping: SyncStatusItem;
+  shopify?: SyncStatusItem;
+  trackingLookup?: SyncStatusItem;
 }
 
 export class OrderFinancialService {
@@ -104,7 +114,8 @@ export class OrderFinancialService {
         COALESCE(SUM(material_cost), 0) as material_cost,
         COALESCE(SUM(fedex_cost), 0) as fedex_cost,
         COALESCE(SUM(etsy_listing_expense), 0) as etsy_listing_expense,
-        COALESCE(SUM(order_etsy_expenses + etsy_ads_expense), 0) as etsy_expenses
+        COALESCE(SUM(order_etsy_expenses + etsy_ads_expense), 0) as etsy_expenses,
+        COALESCE(SUM(shopify_fee), 0) as shopify_fee
       FROM v_order_financials
       WHERE sale_date >= ? AND sale_date <= ?
       GROUP BY month
@@ -131,6 +142,7 @@ export class OrderFinancialService {
         fedexCost: Number(r.fedex_cost) || 0,
         etsyListingExpense: Number(r.etsy_listing_expense) || 0,
         etsyExpenses: Number(r.etsy_expenses) || 0,
+        shopifyFee: Number(r.shopify_fee) || 0,
       };
     });
   }
@@ -147,6 +159,7 @@ export class OrderFinancialService {
         COALESCE(SUM(etsy_ads_expense), 0) as etsy_ads_expense,
         COALESCE(SUM(offsite_ads), 0) as offsite_ads,
         COALESCE(SUM(order_etsy_expenses + total_allocated_expenses - etsy_listing_expense - etsy_ads_expense - offsite_ads), 0) as other_etsy_expenses,
+        COALESCE(SUM(shopify_fee), 0) as shopify_fee,
         COALESCE(SUM(total_expense), 0) as total_expenses
       FROM v_order_financials
       WHERE sale_date >= ? AND sale_date <= ?
@@ -161,6 +174,7 @@ export class OrderFinancialService {
       etsyAds: Number(row.etsy_ads_expense) || 0,
       offsiteAds: Number(row.offsite_ads) || 0,
       otherEtsyExpenses: Number(row.other_etsy_expenses) || 0,
+      shopifyFee: Number(row.shopify_fee) || 0,
       totalExpenses: Number(row.total_expenses) || 0
     };
   }
@@ -179,6 +193,9 @@ export class OrderFinancialService {
     
     return {
       materialCost: Number(row.material_cost) || 0,
+      isClubbed: Boolean(row.is_clubbed),
+      clubbedOrderCount: Number(row.clubbed_order_count || 1),
+      clubbedCalcMethod: row.clubbed_calc_method ? String(row.clubbed_calc_method) : null,
       fedexDutyTransportation: Number(row.fedex_cost) || 0,
       etsyListingExpense: Number(row.etsy_listing_expense) || 0,
       etsyAds: Number(row.etsy_ads_expense) || 0,
@@ -191,6 +208,7 @@ export class OrderFinancialService {
       salesTax: Number(row.sales_tax) || 0,
       regulatoryFee: Number(row.regulatory_fee) || 0,
       etsyExpenses: Number(row.etsy_expenses) || 0,
+      shopifyFee: Number(row.shopify_fee) || 0,
       totalExpense: Number(row.total_expense) || 0
     };
   }
@@ -215,7 +233,7 @@ export class OrderFinancialService {
   }
 
   /**
-   * Fetch paginated Etsy orders with full financial details.
+   * Fetch paginated orders with full financial details.
    * Search handles both Order Number and connected AWB number per Section 17.
    */
   static async getOrders(
@@ -306,13 +324,11 @@ export class OrderFinancialService {
       const fedexCost = Number(row.fedex_cost ?? 0);
       const etsyExpenses = Number(row.etsy_expenses ?? (Number(row.order_etsy_expenses ?? 0) + Number(row.total_allocated_expenses ?? 0)));
       const listingExpense = Number(row.etsy_listing_expense ?? 0);
+      const shopifyFee = Number(row.shopify_fee ?? 0);
 
-      const totalExpense = Number(row.total_expense ?? (materialCost + fedexCost + etsyExpenses));
+      const totalExpense = Number(row.total_expense ?? (materialCost + fedexCost + etsyExpenses + shopifyFee));
       const profit = hasSales ? Number(row.profit ?? ((netSales || 0) - totalExpense)) : -totalExpense;
       
-      // Margin calculation:
-      // Normal/Partial: profit / netSales * 100
-      // Fully Refunded (netSales <= 0, sales > 0): profit / sales * 100
       let margin: number | null = null;
       if (netSales !== null && netSales > 0) {
         margin = (profit / netSales) * 100;
@@ -330,16 +346,23 @@ export class OrderFinancialService {
       }
 
       const awbStr = String(row.awb_numbers ?? 'N/A');
+      const orderSource = String(row.order_source || (row.sales_source === 'SHOPIFY' ? 'SHOPIFY' : 'ETSY_CSV'));
+      const salesSource = String(row.sales_source || 'NONE');
 
       return {
         orderNo: String(row.order_no ?? ""),
-        customerName: "Etsy Buyer",
-        productTitle: String(row.product_title || (hasSales ? "Etsy Order Item" : "External Order")),
+        customerName: orderSource === 'SHOPIFY' ? "Shopify Customer" : "Etsy Buyer",
+        orderSource,
+        salesSource,
+        productTitle: String(row.product_title || (hasSales ? (orderSource === 'SHOPIFY' ? "Shopify Order Item" : "Etsy Order Item") : "External Order")),
         country: String(row.country || "N/A"),
         saleDate: row.formatted_sale_date ? String(row.formatted_sale_date) : formatSalesDate(row.sale_date),
         sales,
         netSales,
         materialCost,
+        isClubbed: Boolean(row.is_clubbed),
+        clubbedOrderCount: Number(row.clubbed_order_count || 1),
+        clubbedCalcMethod: row.clubbed_calc_method ? String(row.clubbed_calc_method) : null,
         dutyCost: fedexCost,
         fedexCost,
         quantity: Number(row.quantity ?? 0),
@@ -347,6 +370,7 @@ export class OrderFinancialService {
         awbNumbers: awbStr,
         awbSources: String(row.awb_sources ?? 'N/A'),
         etsyExpenses,
+        shopifyFee,
         totalExpense,
         profit,
         estimatedProfitBeforeShipping: profit,
@@ -368,6 +392,7 @@ export class OrderFinancialService {
           salesTax: Number(row.sales_tax ?? 0),
           regulatoryFee: Number(row.regulatory_fee ?? 0),
           etsyExpenses,
+          shopifyFee,
           totalExpense,
         },
       };
@@ -380,11 +405,12 @@ export class OrderFinancialService {
   }
 
   /**
-   * Fetch detailed sync statuses for all 4 tracks per Section 24:
-   * - Etsy Statement (synced / not synced, last sync timestamp)
-   * - FedEx Billing (uploaded / not uploaded, last upload timestamp)
-   * - FedEx Mapping (completed / pending / failed, last mapping timestamp)
-   * - Inventory Sheet (synced / not synced, last sync timestamp)
+   * Fetch detailed sync statuses for all tracks:
+   * - Etsy Statement
+   * - FedEx Billing
+   * - FedEx Mapping
+   * - Inventory Sheet
+   * - Shopify Sales
    */
   static async getSyncStatuses(): Promise<SyncStatuses> {
     const syncRows = await fetchQuery<any>(`
@@ -418,7 +444,6 @@ export class OrderFinancialService {
         etsyStatus = 'FAILED';
         etsyDate = etsyMeta?.last_sync_at || latest.completed_at || latest.created_at || etsyDate;
       } else if (latest.status === 'PROCESSING') {
-        // If sync_metadata is marked COMPLETED, or if processing record is older than 5 minutes, resolve state
         const isStale = latest.created_at && (Date.now() - new Date(latest.created_at).getTime() > 5 * 60 * 1000);
         if (etsyMeta?.status === 'COMPLETED' && etsyMeta?.last_sync_at) {
           etsyStatus = 'SYNCED';
@@ -459,11 +484,50 @@ export class OrderFinancialService {
     const inventoryDate = inventoryMeta?.last_sync_at || null;
     const inventoryStatus: SyncStatusItem['status'] = inventoryDate ? 'SYNCED' : 'NOT_SYNCED';
 
+    // 5. Shopify Status
+    const shopifyLatest = await fetchQuery<any>(`
+      SELECT status, started_at, completed_at, total_records 
+      FROM shopify_imports 
+      ORDER BY started_at DESC 
+      LIMIT 1
+    `);
+    const shopifyMeta = syncMap.get('shopify_sales');
+    let shopifyStatus: SyncStatusItem['status'] = 'NOT_SYNCED';
+    let shopifyDate = shopifyMeta?.last_sync_at || null;
+
+    if (shopifyLatest && shopifyLatest.length > 0) {
+      const latest = shopifyLatest[0];
+      if (latest.status === 'COMPLETED') {
+        shopifyStatus = 'SYNCED';
+        shopifyDate = shopifyMeta?.last_sync_at || latest.completed_at || shopifyDate;
+      } else if (latest.status === 'FAILED') {
+        shopifyStatus = 'FAILED';
+        shopifyDate = shopifyMeta?.last_sync_at || latest.completed_at || latest.started_at || shopifyDate;
+      } else if (latest.status === 'PROCESSING') {
+        shopifyStatus = 'PROCESSING';
+        shopifyDate = shopifyMeta?.last_sync_at || latest.started_at || shopifyDate;
+      }
+    } else if (shopifyMeta?.status === 'COMPLETED' || shopifyMeta?.status === 'SYNCED') {
+      shopifyStatus = 'SYNCED';
+    } else if (shopifyDate) {
+      shopifyStatus = 'SYNCED';
+    }
+
+    // 6. Tracking Lookup Status
+    const trackingMeta = syncMap.get('tracking_lookup');
+    const trackingDate = trackingMeta?.last_sync_at || null;
+    let trackingStatus: SyncStatusItem['status'] = 'NOT_SYNCED';
+    if (trackingMeta?.status === 'COMPLETED' || trackingDate) {
+      trackingStatus = 'COMPLETED';
+    } else if (trackingMeta?.status === 'FAILED') {
+      trackingStatus = 'FAILED';
+    }
+
     // Calculate overall status
     let overall: 'SYNCED' | 'PROCESSING' | 'FAILED' | 'PENDING' = 'PENDING';
-    if (etsyStatus === 'FAILED' || fedexMappingStatus === 'FAILED') {
+    if (etsyStatus === 'FAILED' || fedexMappingStatus === 'FAILED' || shopifyStatus === 'FAILED' || trackingStatus === 'FAILED') {
       overall = 'FAILED';
-    } else if (etsyStatus === 'PROCESSING') {
+    } else if (etsyStatus === 'PROCESSING' || shopifyStatus === 'PROCESSING') {
       overall = 'PROCESSING';
     } else if (
       etsyStatus === 'SYNCED' && 
@@ -498,12 +562,20 @@ export class OrderFinancialService {
         status: fedexMappingStatus,
         lastSyncAt: fedexMappingDate ? new Date(fedexMappingDate).toISOString() : null,
       },
+      shopify: {
+        status: shopifyStatus,
+        lastSyncAt: shopifyDate ? new Date(shopifyDate).toISOString() : null,
+      },
+      trackingLookup: {
+        status: trackingStatus,
+        lastSyncAt: trackingDate ? new Date(trackingDate).toISOString() : null,
+      },
     };
   }
 
   /**
-   * Fetches full details for OrderDetailsModal per Section 18:
-   * - summary (financials, sales, refunds, direct NPF, margin)
+   * Fetches full details for OrderDetailsModal:
+   * - summary (financials, sales, refunds, direct NPF, margin, shopify fee, order source)
    * - inventory (material_type, quantity, category, color)
    * - fedexDetails (AWB, total AWB cost, allocated cost)
    * - transactions (Etsy expenses list)
@@ -520,13 +592,16 @@ export class OrderFinancialService {
     }
 
     const s = summaryRows[0];
+    const orderSource = String(s.order_source || (s.sales_source === 'SHOPIFY' ? 'SHOPIFY' : 'ETSY_CSV'));
+    const salesSource = String(s.sales_source || 'NONE');
     const grossSales = Number(s.sales || 0);
     const refundValue = Number(s.refunds || 0);
     const netSales = Number(s.net_sales ?? (grossSales - refundValue));
     const materialCost = Number(s.material_cost || 0);
     const fedexCost = Number(s.fedex_cost || 0);
     const etsyExpenses = Number(s.etsy_expenses || 0);
-    const totalExpense = Number(s.total_expense || (materialCost + fedexCost + etsyExpenses));
+    const shopifyFee = Number(s.shopify_fee || 0);
+    const totalExpense = Number(s.total_expense || (materialCost + fedexCost + etsyExpenses + shopifyFee));
     const directNpf = Number(s.profit ?? (netSales - totalExpense));
 
     let margin: number | null = null;
@@ -570,7 +645,7 @@ export class OrderFinancialService {
       ) b ON w.awb_number = b.awb_number
     `, [orderNo, orderNo]);
 
-    // 3. Etsy Expense Transactions
+    // 3. Etsy Expense Transactions (Empty for pure Shopify orders)
     const transactions = await fetchQuery<any>(`
       SELECT 
         expense_date as date,
@@ -587,7 +662,7 @@ export class OrderFinancialService {
       ORDER BY expense_date DESC, created_at DESC
     `, [orderNo]);
 
-    let productTitle = String(s.product_title || 'Etsy Order Item');
+    let productTitle = String(s.product_title || (orderSource === 'SHOPIFY' ? 'Shopify Order Item' : 'Etsy Order Item'));
     if (!productTitle || productTitle === 'Etsy Order Item' || productTitle.toLowerCase().startsWith('tax') || productTitle.toLowerCase().startsWith('tcs') || productTitle.toLowerCase().startsWith('tds')) {
       const txWithTitle = transactions?.find((t: any) => 
         t.title && t.title.toLowerCase().startsWith('transaction fee:')
@@ -600,6 +675,8 @@ export class OrderFinancialService {
     return {
       summary: {
         orderNo: s.order_no,
+        orderSource,
+        salesSource,
         productTitle,
         country: s.country || 'N/A',
         saleDate: s.sale_date,
@@ -607,8 +684,12 @@ export class OrderFinancialService {
         refundValue,
         netSales,
         materialCost,
+        isClubbed: Boolean(s.is_clubbed),
+        clubbedOrderCount: Number(s.clubbed_order_count || 1),
+        clubbedCalcMethod: s.clubbed_calc_method ? String(s.clubbed_calc_method) : null,
         fedexCost,
         etsyExpenses,
+        shopifyFee,
         totalExpense,
         directNpf,
         netProfit: directNpf,
@@ -618,6 +699,9 @@ export class OrderFinancialService {
         awbNumbers: s.awb_numbers || 'N/A',
         breakdown: {
           materialCost,
+          isClubbed: Boolean(s.is_clubbed),
+          clubbedOrderCount: Number(s.clubbed_order_count || 1),
+          clubbedCalcMethod: s.clubbed_calc_method ? String(s.clubbed_calc_method) : null,
           fedexDutyTransportation: fedexCost,
           listingExpense: Number(s.etsy_listing_expense || 0),
           etsyAds: Number(s.etsy_ads_expense || 0),
@@ -630,6 +714,7 @@ export class OrderFinancialService {
           salesTax: Number(s.sales_tax || 0),
           regulatoryFee: Number(s.regulatory_fee || 0),
           etsyExpenses,
+          shopifyFee,
           totalExpense,
         }
       },
@@ -647,11 +732,17 @@ export class OrderFinancialService {
       SELECT 'Etsy Statement' as source, 'imported' as action, status, COALESCE(new_rows, 0) as rowsProcessed, created_at as timestamp 
       FROM etsy_imports 
       UNION ALL
+      SELECT 'Shopify Sales' as source, 'synchronized' as action, status, COALESCE(new_records, 0) as rowsProcessed, started_at as timestamp 
+      FROM shopify_imports 
+      UNION ALL
       SELECT 'FedEx Billing' as source, 'synchronized' as action, 'COMPLETED' as status, last_processed_row as rowsProcessed, last_sync_at as timestamp 
       FROM sync_metadata WHERE sync_name = 'fedex_billing' AND last_sync_at IS NOT NULL
       UNION ALL
       SELECT 'FedEx Mapping' as source, 'synchronized' as action, status, last_processed_row as rowsProcessed, last_sync_at as timestamp 
       FROM sync_metadata WHERE sync_name = 'fedex_mapping' AND last_sync_at IS NOT NULL
+      UNION ALL
+      SELECT 'Tracking Lookup' as source, 'synchronized' as action, status, last_processed_row as rowsProcessed, last_sync_at as timestamp 
+      FROM sync_metadata WHERE sync_name = 'tracking_lookup' AND last_sync_at IS NOT NULL
       UNION ALL
       SELECT 'Inventory Sheet' as source, 'synchronized' as action, 'COMPLETED' as status, 0 as rowsProcessed, last_sync_at as timestamp 
       FROM sync_metadata WHERE sync_name = 'google_sheets_inventory' AND last_sync_at IS NOT NULL
@@ -661,3 +752,4 @@ export class OrderFinancialService {
     return await fetchQuery<any>(query, [limit, offset]);
   }
 }
+

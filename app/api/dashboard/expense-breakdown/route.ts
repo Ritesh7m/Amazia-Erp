@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
       { name: 'Etsy Ads', value: breakdown.etsyAds, percentage: safePct(breakdown.etsyAds), isPrimary: false },
       { name: 'Offsite Ads', value: breakdown.offsiteAds, percentage: safePct(breakdown.offsiteAds), isPrimary: false },
       { name: 'Other Etsy Expenses', value: breakdown.otherEtsyExpenses, percentage: safePct(breakdown.otherEtsyExpenses), isPrimary: false },
+      { name: 'Shopify Fee', value: Number(breakdown.shopifyFee || 0), percentage: safePct(Number(breakdown.shopifyFee || 0)), isPrimary: true },
     ];
 
     return NextResponse.json({ success: true, data, total });

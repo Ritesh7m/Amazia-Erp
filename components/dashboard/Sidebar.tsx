@@ -21,6 +21,7 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
     fedexBilling?: { status: string | null, lastSyncAt: string | null };
     fedexMapping?: { status: string | null, lastSyncAt: string | null };
     inventory: { status: string | null, lastSyncAt: string | null };
+    shopify?: { status: string | null, lastSyncAt: string | null };
   } | null>(null);
 
   const renderStatus = (item?: { status: string | null, lastSyncAt: string | null }) => {
@@ -151,6 +152,10 @@ export default function Sidebar({ isMobileOpen, closeMobile }: SidebarProps) {
               <div>
                 <div className="text-sm font-medium flex items-center gap-2 text-[var(--color-brand-primary)]">Etsy Statement</div>
                 <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates?.etsy)}</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium flex items-center gap-2 text-[var(--color-brand-primary)]">Shopify Sales</div>
+                <div className="text-xs text-[var(--color-brand-muted)] mt-0.5">{renderStatus(syncDates?.shopify)}</div>
               </div>
               <div>
                 <div className="text-sm font-medium flex items-center gap-2 text-[var(--color-brand-primary)]">FedEx Billing</div>
